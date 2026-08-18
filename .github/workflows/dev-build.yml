@@ -47,6 +47,12 @@ jobs:
     
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 全量构建必须检出 LFS 真实内容：仓库里的背景/角色/音频/图标等素材
+          # 均走 Git LFS（见 .gitattributes）。不开 lfs 时工作树只有指针文件，
+          # prepare-desktop-resources 复制进 bundle 的也是指针，打出来是缺资源的
+          # 骨架版。开启后这些素材以真实文件进入构建（前端 public/ 与 data/）。
+          lfs: true
 
       - uses: pnpm/action-setup@v4
         # 不指定 version：package.json 已声明 packageManager: pnpm@11.21.0，
@@ -119,9 +125,20 @@ jobs:
           RUSTFLAGS: ${{ runner.os == 'Linux' && '-C link-arg=-fuse-ld=mold' || '' }}
         run: pnpm tauri build --no-bundle
 
+      - name: 整理产物（可执行文件 + 随行资源，自包含）
+        shell: bash
+        run: |
+          mkdir -p dist-artifact
+          cp ${{ matrix.artifact-path }} dist-artifact/
+          # --no-bundle 下 Tauri 仍会把 bundle.resources 铺到 release/resources，
+          # 一并带上，保证运行时 resource_dir 能取到 .official/ 游戏数据。
+          if [ -d src-tauri/target/release/resources ]; then
+            cp -r src-tauri/target/release/resources dist-artifact/resources
+          fi
+
       - name: 上传 artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact-name }}
-          path: ${{ matrix.artifact-path }}
+          path: dist-artifact
           retention-days: 7
