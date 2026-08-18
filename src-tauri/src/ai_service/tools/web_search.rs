@@ -1,10 +1,18 @@
 //! 网页搜索工具，两种后端模式：
 //!
 //! 1. 模型 API 内置联网（默认，`use_builtin = true`）：复用用户已配置的聊天模型
-//!    API（Moonshot/Kimi 的 OpenAI 兼容端点），声明 `$web_search` 内置工具，
-//!    由服务端执行搜索。协议（见 platform.moonshot.cn/docs/guide/use-web-search）：
-//!    模型返回 tool_calls 后，客户端把参数原样回传为 tool 消息，服务端继续生成最终答案。
-//!    无需单独的搜索 API Key。
+//!    API 内置的联网搜索能力，由服务端执行搜索，无需单独的搜索 API Key。
+//!    按聊天模型端点分发：
+//!    - Moonshot/Kimi（base_url 指向 api.moonshot.cn / api.moonshot.ai）：声明
+//!      `$web_search` 内置工具（`builtin_function` 类型），协议见
+//!      platform.moonshot.cn/docs/guide/use-web-search：模型返回 tool_calls 后，
+//!      客户端把参数原样回传为 tool 消息，服务端继续生成最终答案。
+//!    - DeepSeek 官方 API（base_url 指向 api.deepseek.com）：走 Responses 接口
+//!      `{base_url}/responses`，声明内置 `web_search` 工具并强制 tool_choice，
+//!      服务端执行搜索后在同一响应里给出最终回答（见
+//!      api-docs.deepseek.com/guides/responses_api）。
+//!    - kimicode（Anthropic 协议）不支持内置搜索，改直连 `/v1/search` 独立端点。
+//!    其余 OpenAI 兼容端点不支持这些内置协议，会给出可操作的报错提示。
 //! 2. 独立搜索端点（`use_builtin = false`）：直接 POST Moonshot `/search` 端点，
 //!    需要单独的 API Key。参考 kimi-code 的 WebSearch 设计（极简 query 参数、
 //!    纯文本结果、错误分类成模型可读文本）。
@@ -16,7 +24,7 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::Value;
 
-use crate::ai_service::llm::provider_config::resolve_chat_provider;
+use crate::ai_service::llm::provider_config::{resolve_chat_provider, LlmProviderConfig};
 use crate::ai_service::types::ToolDefinition;
 
 use super::executor::{Tool, ToolContext, ToolError, ToolResult};
@@ -382,6 +390,125 @@ impl WebSearchTool {
         }))
     }
 
+    /// DeepSeek 官方 API 的联网搜索：走 Responses 接口（`{base_url}/responses`），
+    /// 声明内置 `web_search` 工具并强制 `tool_choice`，服务端执行搜索后在同一响应
+    /// 里直接给出基于搜索结果的最终回答，无需额外的搜索 API Key。
+    /// 协议见 api-docs.deepseek.com/guides/responses_api。
+    async fn execute_deepseek_search(
+        &self,
+        query: &str,
+        cfg: &WebSearchSettings,
+        provider: &LlmProviderConfig,
+    ) -> Result<ToolResult, ToolError> {
+        let base = provider.base_url.trim().trim_end_matches('/');
+        // /v1 只是 OpenAI SDK 兼容前缀，Responses 的权威端点是 {base}/responses
+        let base = base.strip_suffix("/v1").unwrap_or(base);
+        let endpoint = format!("{base}/responses");
+        let client = Self::build_client(cfg)?;
+        // instructions 会被服务端当作首条 system 消息；按「隐藏搜索结果」选项定制提示
+        let instructions = if cfg.hide_search_results {
+            "你是联网搜索助手。请使用 web_search 工具搜索用户问题，然后把关键内容自然地\
+             融入回答，绝对不要输出来源名称、网址或链接列表。"
+        } else {
+            "你是联网搜索助手。请使用 web_search 工具搜索用户问题，然后用简洁的中文\
+             总结搜索结果，保留关键事实与来源链接。"
+        };
+        // 第一轮强制联网；若服务端在响应里只回 web_search_call 未带最终答案，
+        // 则把 web_search_call 项原样回传让服务端恢复搜索结果后直接作答
+        let mut input_items: Value = serde_json::json!([
+            { "type": "message", "role": "user", "content": query }
+        ]);
+        let mut force_search = true;
+        for _round in 0..2 {
+            let body = serde_json::json!({
+                "model": provider.model,
+                "instructions": instructions,
+                "input": input_items,
+                "tools": [ { "type": "web_search" } ],
+                // 强制执行一次联网搜索，避免模型直接作答而不搜索
+                "tool_choice": if force_search {
+                    serde_json::json!({ "type": "web_search" })
+                } else {
+                    serde_json::json!("auto")
+                },
+                "stream": false,
+            });
+            let response = client
+                .post(&endpoint)
+                .bearer_auth(provider.api_key.trim())
+                .json(&body)
+                .send()
+                .await
+                .map_err(classify_request_error)?;
+
+            let status = response.status();
+            if !status.is_success() {
+                return Err(ToolError::Execution(http_error_message(status, response).await));
+            }
+
+            let payload: Value = response
+                .json()
+                .await
+                .map_err(|e| ToolError::Execution(format!("搜索响应解析失败: {e}")))?;
+            let Some(output) = payload.get("output").and_then(Value::as_array) else {
+                return Err(ToolError::Execution("搜索响应缺少 output 数组".into()));
+            };
+
+            // 服务端在 output 里先给 web_search_call 项、随后是携带最终回答的 message 项；
+            // 把 message 项的 output_text 文本拼起来作为搜索结果返回
+            let mut text = String::new();
+            let mut search_calls: Vec<Value> = Vec::new();
+            for item in output {
+                match item.get("type").and_then(Value::as_str) {
+                    Some("message") => {
+                        if let Some(parts) = item.get("content").and_then(Value::as_array) {
+                            for part in parts {
+                                if part.get("type").and_then(Value::as_str) == Some("output_text") {
+                                    if let Some(t) = part.get("text").and_then(Value::as_str) {
+                                        text.push_str(t);
+                                        text.push('\n');
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Some("web_search_call") => search_calls.push(item.clone()),
+                    _ => {}
+                }
+            }
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                let mut final_text = trimmed.to_string();
+                truncate_output(&mut final_text);
+                return Ok(serde_json::json!({
+                    "ok": true,
+                    "query": query,
+                    "text": final_text,
+                }));
+            }
+            // 没有最终答案但服务端执行了搜索：原样回传 web_search_call 项续一轮
+            if search_calls.is_empty() {
+                return Err(ToolError::Execution("搜索服务未返回有效内容".into()));
+            }
+            let mut next: Vec<Value> = vec![serde_json::json!({
+                "type": "message",
+                "role": "user",
+                "content": query,
+            })];
+            next.extend(search_calls);
+            input_items = Value::Array(next);
+            force_search = false;
+        }
+
+        Err(ToolError::Execution("DeepSeek 联网搜索连续两轮仍未返回有效内容".into()))
+    }
+
+    /// 判断当前聊天模型是否指向 DeepSeek 官方 API（api.deepseek.com 兼容端点）。
+    /// DeepSeek 官方 API 通过 Responses 接口提供内置 `web_search` 工具。
+    fn is_deepseek_api(provider: &LlmProviderConfig) -> bool {
+        provider.base_url.trim().to_ascii_lowercase().contains("deepseek")
+    }
+
     /// 模型 API 内置联网模式：声明 `$web_search`，按协议回显 tool_calls 参数。
     async fn execute_builtin(
         &self,
@@ -398,6 +525,34 @@ impl WebSearchTool {
             // 但 api.kimi.com/coding 提供独立的 /v1/search 端点（Kimi Code CLI 同款），
             // 复用聊天 Key 客户端直连即可。
             return self.execute_kimicode_search(query, cfg, &provider).await;
+        }
+        if Self::is_deepseek_api(&provider) {
+            // DeepSeek 官方 API：内置联网走 Responses 接口（{base_url}/responses），
+            // 声明 web_search 内置工具由服务端执行，无需额外的搜索 API Key。
+            return self.execute_deepseek_search(query, cfg, &provider).await;
+        }
+        if !Self::supports_builtin_search(&provider) {
+            // $web_search（builtin_function 类型）是 Kimi/Moonshot 专有的内置工具协议，
+            // 只在 api.moonshot.cn / api.moonshot.ai 等官方端点提供；其他 OpenAI 兼容
+            // 服务（通义、Ollama 等）只认 type: "function"，直接声明
+            // builtin_function 会被服务端以 HTTP 400 拒绝（tools[0].type 反序列化失败）。
+            tracing::warn!(
+                provider = %provider.label,
+                base_url = %provider.base_url,
+                "内置联网：当前聊天模型不支持 $web_search 内置协议"
+            );
+            return Err(ToolError::Execution(format!(
+                "「模型 API 内置联网」仅支持 Kimi/Moonshot 与 DeepSeek 官方聊天模型 API，当前聊天模型「{}」（{}）\
+                 不支持 Kimi 的 $web_search 内置工具。请在「高级设置 → 工具配置 → 网页搜索」\
+                 关闭「模型 API 内置联网」改用「独立搜索端点」（需填写 API Key），或将聊天模型\
+                 切换到 Moonshot/Kimi 或 DeepSeek 官方 API（服务地址指向 api.moonshot.cn / api.deepseek.com）。",
+                provider.label,
+                if provider.base_url.trim().is_empty() {
+                    "未填服务地址".to_string()
+                } else {
+                    provider.base_url.trim().to_string()
+                },
+            )));
         }
 
         let base = if provider.base_url.trim().is_empty() {
@@ -508,6 +663,17 @@ impl WebSearchTool {
             "内置联网搜索超过 {MAX_BUILTIN_ROUNDS} 轮仍未返回结果"
         )))
     }
+
+    /// 判断当前聊天模型端点是否兼容 Kimi/Moonshot 的 `$web_search` 内置工具协议。
+    ///
+    /// `$web_search`（`type: "builtin_function"`）只在 Moonshot 官方端点提供，
+    /// 因此这里以 base_url 是否指向 Moonshot 判断兼容性；未填 base_url 时沿用下方
+    /// 请求逻辑的默认值（Moonshot 官方端点）视为兼容。其余 OpenAI 兼容服务
+    /// （DeepSeek/通义/Ollama 等）只接受 `type: "function"`，走此判定之外的分支。
+    fn supports_builtin_search(provider: &LlmProviderConfig) -> bool {
+        let base = provider.base_url.trim().trim_end_matches('/').to_ascii_lowercase();
+        base.is_empty() || base.contains("moonshot")
+    }
 }
 
 /// 限制返回给模型的文本长度。
@@ -593,5 +759,69 @@ mod tests {
         let bounded = bounded_query(&query);
         assert_eq!(bounded.chars().count(), MAX_QUERY_CHARS);
         assert!(bounded.is_char_boundary(bounded.len()));
+    }
+
+    #[test]
+    fn builtin_search_only_supports_moonshot_endpoints() {
+        let provider = |base_url: &str| LlmProviderConfig {
+            id: "t".into(),
+            label: "test".into(),
+            provider: "openai".into(),
+            model: "kimi-k2.6".into(),
+            api_key: "k".into(),
+            base_url: base_url.into(),
+            temperature: None,
+            top_p: None,
+            enable_thinking: false,
+            reasoning_effort: None,
+        };
+        // 未填 base_url：按 Moonshot 官方端点默认值处理，视为兼容
+        assert!(WebSearchTool::supports_builtin_search(&provider("")));
+        // Moonshot 官方端点
+        assert!(WebSearchTool::supports_builtin_search(&provider(
+            "https://api.moonshot.cn/v1"
+        )));
+        assert!(WebSearchTool::supports_builtin_search(&provider(
+            "https://api.moonshot.ai/v1/"
+        )));
+        assert!(WebSearchTool::supports_builtin_search(&provider(
+            "  https://api.moonshot.cn/v1  "
+        )));
+        // 其他 OpenAI 兼容端点一律不兼容内置联网协议
+        assert!(!WebSearchTool::supports_builtin_search(&provider(
+            "https://api.deepseek.com"
+        )));
+        assert!(!WebSearchTool::supports_builtin_search(&provider(
+            "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )));
+        assert!(!WebSearchTool::supports_builtin_search(&provider(
+            "http://localhost:11434/v1"
+        )));
+    }
+
+    #[test]
+    fn deepseek_api_detection() {
+        let provider = |base_url: &str| LlmProviderConfig {
+            id: "t".into(),
+            label: "test".into(),
+            provider: "openai".into(),
+            model: "deepseek-v4-flash".into(),
+            api_key: "k".into(),
+            base_url: base_url.into(),
+            temperature: None,
+            top_p: None,
+            enable_thinking: false,
+            reasoning_effort: None,
+        };
+        // DeepSeek 官方 API（含 /v1 兼容前缀）走 Responses 接口联网
+        assert!(WebSearchTool::is_deepseek_api(&provider("https://api.deepseek.com")));
+        assert!(WebSearchTool::is_deepseek_api(&provider("https://api.deepseek.com/v1")));
+        assert!(WebSearchTool::is_deepseek_api(&provider("https://api.deepseek.com/v1/")));
+        assert!(WebSearchTool::is_deepseek_api(&provider(" HTTPS://API.DEEPSEEK.COM ")));
+        // 非 DeepSeek 端点不进该分支
+        assert!(!WebSearchTool::is_deepseek_api(&provider("")));
+        assert!(!WebSearchTool::is_deepseek_api(&provider("https://api.moonshot.cn/v1")));
+        assert!(!WebSearchTool::is_deepseek_api(&provider("https://api.openai.com/v1")));
+        assert!(!WebSearchTool::is_deepseek_api(&provider("http://localhost:11434/v1")));
     }
 }

@@ -116,7 +116,7 @@ export default {
     enableWebSearch: 'ウェブ検索ツールを有効化（あの子がネットで調べられるようになるよ）',
     useBuiltin: 'モデル API の内蔵検索を使用（API Key 不要）',
     hideSearchResults: '検索結果を隠す（あの子の回答にソースや URL を表示しない）',
-    builtinHint: '検索は現在のチャットモデル API（Kimi/Moonshot が必要）のサーバー側で実行されるよ。今のチャット Key だけで使えるから、別途申請は不要だよ',
+    builtinHint: '検索は現在のチャットモデル API（Kimi/Moonshot または DeepSeek 公式 API）のサーバー側で実行されるよ。今のチャット Key だけで使えるから、別途申請は不要だよ',
     apiKey: 'API Key',
     provider: '検索プロバイダー',
     providerCustom: 'カスタム端点',

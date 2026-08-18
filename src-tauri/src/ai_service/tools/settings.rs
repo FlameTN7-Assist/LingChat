@@ -64,8 +64,9 @@ pub const TOOL_GROUPS: &[(&str, &[&str])] = &[
 pub struct WebSearchSettings {
     /// 总开关：关闭时工具不下发给模型，执行也会被拒绝。
     pub enabled: bool,
-    /// 为 true 时使用「模型 API 内置联网」：复用聊天模型的 API（Moonshot/Kimi），
-    /// 由服务端执行 $web_search，无需单独的搜索 API Key；
+    /// 为 true 时使用「模型 API 内置联网」：复用聊天模型 API 内置的联网搜索
+    /// （Moonshot/Kimi 的 $web_search、DeepSeek 官方 API 的 Responses web_search），
+    /// 由服务端执行搜索，无需单独的搜索 API Key；
     /// 为 false 时使用独立搜索端点 + api_key。
     pub use_builtin: bool,
     /// 独立端点模式的搜索服务提供商：
