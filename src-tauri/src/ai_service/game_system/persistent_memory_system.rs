@@ -595,7 +595,7 @@ mod tests {
 
         let mut tool_result_line = make_line(
             1,
-            r#"{"tool_call_id":"call_1","result":"晴天 25°C"}"#.to_string(),
+            r#"{"tool_call_id":"call_1","result":"晴天 25°C"}"#,
         );
         tool_result_line.base.attribute = LineAttributeExt(LineAttribute::Tool);
         tool_result_line.base.sender_role_id = None;

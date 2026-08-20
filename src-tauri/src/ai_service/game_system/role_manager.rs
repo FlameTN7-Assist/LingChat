@@ -696,10 +696,10 @@ mod tests {
     use crate::ai_service::types::{LineAttributeExt, LineBase};
 
     /// 构造一条台词：attribute 与 sender_role_id 可覆盖（默认 User / role 1）。
-    fn line(attr: LineAttribute, content: &str, tool_call: Option<&str>) -> GameLine {
+    fn line(attr: LineAttribute, content: &str, tool_call: Option<String>) -> GameLine {
         let mut base = LineBase::default();
         base.content = content.to_string();
-        base.tool_call = tool_call.map(String::from);
+        base.tool_call = tool_call;
         base.attribute = LineAttributeExt(attr);
         base.sender_role_id = Some(1);
         GameLine::from_base(base, vec![1])
@@ -709,7 +709,9 @@ mod tests {
         line(
             LineAttribute::Assistant,
             "我来查一下",
-            Some(&format!(r#"[{{"id":"{id}","function":{{"name":"x","description":"","parameters":{{}}}}}}]"#)),
+            Some(format!(
+                r#"[{{"id":"{id}","function":{{"name":"x","description":"","parameters":{{}}}}}}]"#
+            )),
         )
     }
 
