@@ -107,3 +107,10 @@ jobs:
           pnpm build
           cd src-tauri
           cargo build
+
+      # 临时验证（不入 PR）：编译并运行 game_system 单元测试（含记忆压缩/工具调用配对）。
+      - name: 运行单元测试（临时验证）
+        if: runner.os == 'Linux'
+        run: |
+          cd src-tauri
+          cargo test game_system
