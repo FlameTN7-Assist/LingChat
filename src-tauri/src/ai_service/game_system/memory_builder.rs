@@ -348,7 +348,7 @@ mod tests {
         let mut base = LineBase::default();
         base.content = content.to_string();
         base.tool_call = Some(format!(
-            r#"[{{"id":"{id}","function":{{"name":"web_search","description":"","parameters":{{}}}}}}]"#
+            r#"[{{"id":"{id}","function":{{"name":"web_search","arguments":"{{}}"}}}}]"#
         ));
         base.attribute = LineAttributeExt(LineAttribute::Assistant);
         GameLine::from_base(base, vec![1])

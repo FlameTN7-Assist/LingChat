@@ -589,8 +589,7 @@ mod tests {
         // 若不加工具行过滤，它们会被计入「可见台词」导致阈值被冲高。
         tool_call_line.perceived_role_ids = vec![1];
         tool_call_line.base.tool_call = Some(
-            r#"[{"id":"call_1","function":{"name":"web_search","description":"","parameters":{}}}]"#
-                .to_string(),
+            r#"[{"id":"call_1","function":{"name":"web_search","arguments":"{}"}}]"#.to_string(),
         );
 
         let mut tool_result_line = make_line(

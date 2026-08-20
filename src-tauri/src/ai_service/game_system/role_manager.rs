@@ -710,7 +710,7 @@ mod tests {
             LineAttribute::Assistant,
             "我来查一下",
             Some(format!(
-                r#"[{{"id":"{id}","function":{{"name":"x","description":"","parameters":{{}}}}}}]"#
+                r#"[{{"id":"{id}","function":{{"name":"x","arguments":"{{}}"}}}}]"#
             )),
         )
     }
