@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::ai_service::types::{GameLine, LineBase, LlmMessage};
 use crate::db::entities::line::LineAttribute;
 
@@ -153,6 +155,11 @@ impl MemoryBuilder {
 
         let mut has_system_for_target = false;
 
+        // 上下文内「已发出、尚未收到结果」的工具调用 id 集合。用于两件事：
+        // 1) 丢弃裁剪窗口起点切开配对导致的孤儿 tool 结果（其 assistant(tool_call) 在窗外）；
+        // 2) 收尾时剥离结果缺失的悬空 tool_calls，保证发给 LLM 的调用-结果配对完整。
+        let mut open_tool_call_ids: HashSet<String> = HashSet::new();
+
         for line in lines {
             // system 消息处理逻辑保持不变...
             if matches!(line.attribute(), LineAttribute::System) {
@@ -190,6 +197,7 @@ impl MemoryBuilder {
                         )
                     {
                         flush(&mut memory, &mut buffer, &mut buffer_kind, self);
+                        register_tool_call_ids(&mut open_tool_call_ids, &tool_calls);
                         memory.push(LlmMessage {
                             role: "assistant".into(),
                             content: line.base.content.clone(),
@@ -212,6 +220,7 @@ impl MemoryBuilder {
                     >(tool_calls_json)
                     {
                         flush(&mut memory, &mut buffer, &mut buffer_kind, self);
+                        register_tool_call_ids(&mut open_tool_call_ids, &tool_calls);
                         memory.push(LlmMessage {
                             role: "assistant".into(),
                             content: text.to_string(),
@@ -238,12 +247,21 @@ impl MemoryBuilder {
                             )
                         })
                         .unwrap_or((None, line.base.content.clone()));
-                memory.push(LlmMessage {
-                    role: "tool".into(),
-                    content: result,
-                    tool_calls: None,
-                    tool_call_id,
-                });
+                // 仅保留在本上下文内有配对 assistant(tool_call) 的工具结果；
+                // 裁剪窗口起点切开配对时会出现孤儿 tool 消息，直接丢弃，
+                // 避免发给 LLM 的对话中混入无配对的 tool 角色消息（provider 会拒绝）。
+                let paired = match tool_call_id.as_deref() {
+                    Some(id) => open_tool_call_ids.remove(id),
+                    None => false,
+                };
+                if paired {
+                    memory.push(LlmMessage {
+                        role: "tool".into(),
+                        content: result,
+                        tool_calls: None,
+                        tool_call_id,
+                    });
+                }
                 continue;
             }
 
@@ -269,6 +287,134 @@ impl MemoryBuilder {
         }
 
         flush(&mut memory, &mut buffer, &mut buffer_kind, self);
+
+        // 收尾：剥离「结果缺失」的悬空工具调用（如窗口在助手工具调用后切开、结果未写入）。
+        // 规则：若某条 assistant 消息的任一 tool_call 在本上下文内未收到对应 tool 结果，
+        // 整条剥离 tool_calls（保留正文），保证 provider 要求的调用-结果配对完整。
+        if !open_tool_call_ids.is_empty() {
+            for msg in memory.iter_mut() {
+                if msg.role != "assistant" {
+                    continue;
+                }
+                let has_missing = msg
+                    .tool_calls
+                    .as_ref()
+                    .map_or(false, |calls| calls.iter().any(|c| open_tool_call_ids.contains(&c.id)));
+                if has_missing {
+                    msg.tool_calls = None;
+                }
+            }
+        }
+
         memory
+    }
+}
+
+/// 把一次助手工具调用的全部 call id 登记进 `open_tool_call_ids`，供后续
+/// tool 结果行配对校验与收尾剥离使用。空 id（provider 异常）不登记。
+fn register_tool_call_ids(open: &mut HashSet<String>, calls: &[crate::ai_service::types::ToolCall]) {
+    for call in calls {
+        if !call.id.trim().is_empty() {
+            open.insert(call.id.clone());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai_service::types::LineAttributeExt;
+
+    /// 构造目标角色(1) 的用户消息行。
+    fn user_line(content: &str) -> GameLine {
+        let mut base = LineBase::default();
+        base.content = content.to_string();
+        base.attribute = LineAttributeExt(LineAttribute::User);
+        base.sender_role_id = Some(0);
+        GameLine::from_base(base, vec![1])
+    }
+
+    /// 构造目标角色(1) 的普通助手正文行。
+    fn assistant_line(content: &str) -> GameLine {
+        let mut base = LineBase::default();
+        base.content = content.to_string();
+        base.attribute = LineAttributeExt(LineAttribute::Assistant);
+        base.sender_role_id = Some(1);
+        GameLine::from_base(base, vec![1])
+    }
+
+    /// 构造助手工具调用行（新版：tool_call 字段存 JSON，content 为调用前正文）。
+    fn tool_call_line(id: &str, content: &str) -> GameLine {
+        let mut base = LineBase::default();
+        base.content = content.to_string();
+        base.tool_call = Some(format!(
+            r#"[{{"id":"{id}","function":{{"name":"web_search","description":"","parameters":{{}}}}}}]"#
+        ));
+        base.attribute = LineAttributeExt(LineAttribute::Assistant);
+        GameLine::from_base(base, vec![1])
+    }
+
+    /// 构造工具结果行（content 为 {"tool_call_id","result"} JSON）。
+    fn tool_result_line(id: &str, result: &str) -> GameLine {
+        let mut base = LineBase::default();
+        base.content = serde_json::json!({ "tool_call_id": id, "result": result }).to_string();
+        base.attribute = LineAttributeExt(LineAttribute::Tool);
+        GameLine::from_base(base, vec![1])
+    }
+
+    /// 完整工具轮次（调用→结果→正文）应原样构建，配对完整。
+    #[test]
+    fn complete_tool_round_is_built_in_order() {
+        let builder = MemoryBuilder::new(1);
+        let lines = vec![
+            user_line("帮我查天气"),
+            tool_call_line("call_1", "我来查一下"),
+            tool_result_line("call_1", "晴天 25°C"),
+            assistant_line("【开心】今天 25 度晴天"),
+        ];
+        let msgs = builder.build(&lines);
+        let roles: Vec<&str> = msgs.iter().map(|m| m.role.as_str()).collect();
+        assert_eq!(roles, vec!["user", "assistant", "tool", "assistant"]);
+        assert!(msgs[1].tool_calls.is_some());
+        assert_eq!(msgs[2].tool_call_id.as_deref(), Some("call_1"));
+    }
+
+    /// 窗口起点切开配对：孤儿 tool 结果（无配对 assistant(tool_call)）应被丢弃，
+    /// 避免发给 LLM 的对话中出现无配对的 tool 角色消息（provider 会拒绝）。
+    #[test]
+    fn orphan_tool_result_is_dropped() {
+        let builder = MemoryBuilder::new(1);
+        let lines = vec![tool_result_line("call_9", "晴天 25°C"), assistant_line("【开心】25 度")];
+        let msgs = builder.build(&lines);
+        assert!(msgs.iter().all(|m| m.role != "tool"));
+        assert_eq!(msgs.last().map(|m| m.role.as_str()), Some("assistant"));
+    }
+
+    /// 窗口在助手工具调用后切开、结果未写入：悬空 tool_calls 应被剥离（保留正文）。
+    #[test]
+    fn dangling_tool_calls_are_stripped() {
+        let builder = MemoryBuilder::new(1);
+        let lines = vec![user_line("帮我查天气"), tool_call_line("call_2", "我来查一下")];
+        let msgs = builder.build(&lines);
+        let last = msgs.last().unwrap();
+        assert_eq!(last.role, "assistant");
+        assert!(last.tool_calls.is_none());
+    }
+
+    /// 多结果轮次：一次调用多个工具，结果逐个配对后正常保留。
+    #[test]
+    fn multi_result_round_pairs_all() {
+        let builder = MemoryBuilder::new(1);
+        let lines = vec![
+            user_line("查两个东西"),
+            tool_call_line("a", ""),
+            tool_call_line("b", ""),
+            tool_result_line("a", "结果A"),
+            tool_result_line("b", "结果B"),
+            assistant_line("【思考】查到啦"),
+        ];
+        let msgs = builder.build(&lines);
+        let roles: Vec<&str> = msgs.iter().map(|m| m.role.as_str()).collect();
+        assert_eq!(roles, vec!["user", "assistant", "assistant", "tool", "tool", "assistant"]);
     }
 }

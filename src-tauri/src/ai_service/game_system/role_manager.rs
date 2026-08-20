@@ -323,6 +323,11 @@ impl GameRoleManager {
             };
 
             // 阶段 3: 裁剪 + 构建角色记忆
+            // 裁剪窗口起点对齐到完整工具轮次：若起点落在工具结果(Tool)行，其配对的
+            // assistant(tool_call) 行在窗口之外，MemoryBuilder 会产出无配对的孤儿
+            // tool 消息，被 LLM provider 拒绝导致对话报错。向前回溯到配对行，
+            // 保证窗口以完整工具轮次开头（结果缺失的悬空调用由 MemoryBuilder 兜底剥离）。
+            let slice_start = Self::align_slice_start(source_lines, slice_start);
             let sliced: Vec<GameLine> = if slice_start > 0 && slice_start < source_lines.len() {
                 source_lines[slice_start..].to_vec()
             } else {
@@ -624,6 +629,17 @@ impl GameRoleManager {
         })
     }
 
+    /// 对齐裁剪窗口起点：若起点落在工具结果(Tool)行，向前回溯直到窗口以完整工具轮次
+    /// 开头（包含配对的 assistant(tool_call) 行）。工具结果行的配对调用行总是紧邻其
+    /// 之前，因此回溯步长有限，不会退回到窗口之前很远。起点不在 Tool 行时原样返回。
+    fn align_slice_start(lines: &[GameLine], start: usize) -> usize {
+        let mut s = start.min(lines.len());
+        while s > 0 && s < lines.len() && matches!(lines[s].attribute(), LineAttribute::Tool) {
+            s -= 1;
+        }
+        s
+    }
+
     /// 提供给 memory_builder 之外的工具：把 `memory` 合并成 `[{role,content}, ...]` 的 serde 形式。
     pub fn memory_as_json(&self, role_id: i32) -> Option<Vec<LlmMessage>> {
         self.loaded_roles.get(&role_id).map(|r| r.memory.clone())
@@ -671,5 +687,78 @@ fn build_voice_maker(
             tracing::warn!("VoiceMaker 初始化失败: {e}");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai_service::types::{LineAttributeExt, LineBase};
+
+    /// 构造一条台词：attribute 与 sender_role_id 可覆盖（默认 User / role 1）。
+    fn line(attr: LineAttribute, content: &str, tool_call: Option<&str>) -> GameLine {
+        let mut base = LineBase::default();
+        base.content = content.to_string();
+        base.tool_call = tool_call.map(String::from);
+        base.attribute = LineAttributeExt(attr);
+        base.sender_role_id = Some(1);
+        GameLine::from_base(base, vec![1])
+    }
+
+    fn assistant_tool_call(id: &str) -> GameLine {
+        line(
+            LineAttribute::Assistant,
+            "我来查一下",
+            Some(&format!(r#"[{{"id":"{id}","function":{{"name":"x","description":"","parameters":{{}}}}}}]"#)),
+        )
+    }
+
+    fn tool_result(id: &str) -> GameLine {
+        line(
+            LineAttribute::Tool,
+            &serde_json::json!({ "tool_call_id": id, "result": "r" }).to_string(),
+            None,
+        )
+    }
+
+    /// 起点落在 Tool 结果行时应回溯到配对的 assistant(tool_call) 行。
+    #[test]
+    fn slice_start_on_tool_result_backs_up_to_pair() {
+        // 0:用户 1:assistant(tool_call) 2:tool 3:tool 4:assistant(正文)
+        let lines = vec![
+            line(LineAttribute::User, "查天气", None),
+            assistant_tool_call("c1"),
+            tool_result("c1"),
+            tool_result("c1_2"),
+            line(LineAttribute::Assistant, "【开心】查到了", None),
+        ];
+        // 起点 2、3 都落在 Tool 行 → 回溯到 1（配对行）
+        assert_eq!(GameRoleManager::align_slice_start(&lines, 2), 1);
+        assert_eq!(GameRoleManager::align_slice_start(&lines, 3), 1);
+    }
+
+    /// 起点不在 Tool 行时应原样保留（助手正文 / 用户行均不回溯）。
+    #[test]
+    fn slice_start_on_normal_line_stays() {
+        let lines = vec![
+            line(LineAttribute::User, "查天气", None),
+            assistant_tool_call("c1"),
+            tool_result("c1"),
+            line(LineAttribute::Assistant, "【开心】查到了", None),
+        ];
+        assert_eq!(GameRoleManager::align_slice_start(&lines, 0), 0);
+        assert_eq!(GameRoleManager::align_slice_start(&lines, 1), 1);
+        assert_eq!(GameRoleManager::align_slice_start(&lines, 3), 3);
+    }
+
+    /// 越界/空列表安全：起点裁剪到长度，不 panic。
+    #[test]
+    fn slice_start_out_of_bounds_is_safe() {
+        let lines = vec![
+            line(LineAttribute::User, "查天气", None),
+            line(LineAttribute::Assistant, "【开心】查到了", None),
+        ];
+        assert_eq!(GameRoleManager::align_slice_start(&lines, 99), 2);
+        assert_eq!(GameRoleManager::align_slice_start(&[], 0), 0);
     }
 }

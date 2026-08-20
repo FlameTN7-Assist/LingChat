@@ -416,12 +416,34 @@ impl PersistentMemorySystem {
     /// 对标 Python `PersistentMemorySystem._build_chat_text_and_count`：
     /// 1. 统计非 system 且该角色可见的台词数（visible_count）
     /// 2. 用 MemoryBuilder 构建该角色视角的 LLM 消息，转为纯文本
+    ///
+    /// 工具调用/结果行（`Tool` 属性、或带 `tool_call` 的 `Assistant` 行）属于操作
+    /// 噪音：既不计入「可见台词」阈值（避免阈值被工具流量冲高、比设计更频繁触发），
+    /// 也不进压缩摘要（避免记忆被工具调用/返回的原始 JSON 污染）。压缩只关注真正的
+    /// 对话内容——工具执行的过程与结果信息由助手正文承担，无需逐行入记忆。
     fn build_chat_text_and_count(&self, lines: &[GameLine]) -> (String, usize) {
         use crate::db::entities::line::LineAttribute;
 
-        // 统计可见非 system 台词
+        // 过滤工具行（含新版 tool_call 字段与旧版 \n\n 内嵌两种形态）
+        let is_tool_line = |line: &GameLine| {
+            matches!(line.attribute(), LineAttribute::Tool)
+                || (matches!(line.attribute(), LineAttribute::Assistant)
+                    && line
+                        .base
+                        .tool_call
+                        .as_deref()
+                        .map(|s| !s.is_empty())
+                        .unwrap_or(false))
+        };
+        let filtered: Vec<GameLine> = lines
+            .iter()
+            .filter(|l| !is_tool_line(l))
+            .cloned()
+            .collect();
+
+        // 统计可见非 system 台词（已过滤工具行）
         let mut visible_count: usize = 0;
-        for line in lines {
+        for line in &filtered {
             if matches!(line.attribute(), LineAttribute::System) {
                 continue;
             }
@@ -436,9 +458,9 @@ impl PersistentMemorySystem {
             return (String::new(), 0);
         }
 
-        // 用 MemoryBuilder 构建角色视角上下文
+        // 用 MemoryBuilder 构建角色视角上下文（仅对话内容）
         let builder = MemoryBuilder::new(self.role_id);
-        let built = builder.build(lines);
+        let built = builder.build(&filtered);
 
         let mut chunks: Vec<String> = Vec::new();
         for msg in &built {
@@ -552,5 +574,47 @@ mod tests {
         sys.check_and_trigger_auto_update(&lines);
         assert!(!sys.is_updating.load(Ordering::Acquire));
         assert_eq!(sys.fail_count.load(Ordering::Acquire), 0);
+    }
+
+    /// 工具调用/结果行不参与压缩：既不计入「可见台词」阈值，也不进压缩文本。
+    #[test]
+    fn tool_lines_are_excluded_from_compression() {
+        use crate::ai_service::types::LineAttributeExt;
+        use crate::db::entities::line::LineAttribute;
+
+        let mut tool_call_line = make_line(1, "好的，我来查询");
+        tool_call_line.base.attribute = LineAttributeExt(LineAttribute::Assistant);
+        tool_call_line.base.sender_role_id = None;
+        // 真实工具行的 perceived = 全场在场角色（含目标角色 1）：
+        // 若不加工具行过滤，它们会被计入「可见台词」导致阈值被冲高。
+        tool_call_line.perceived_role_ids = vec![1];
+        tool_call_line.base.tool_call = Some(
+            r#"[{"id":"call_1","function":{"name":"web_search","description":"","parameters":{}}}]"#
+                .to_string(),
+        );
+
+        let mut tool_result_line = make_line(
+            1,
+            r#"{"tool_call_id":"call_1","result":"晴天 25°C"}"#.to_string(),
+        );
+        tool_result_line.base.attribute = LineAttributeExt(LineAttribute::Tool);
+        tool_result_line.base.sender_role_id = None;
+        tool_result_line.perceived_role_ids = vec![1];
+
+        let mut reply = make_line(1, "【开心】今天天气不错，25 度晴天");
+        reply.base.attribute = LineAttributeExt(LineAttribute::Assistant);
+
+        let lines = vec![make_line(1, "帮我查一下天气"), tool_call_line, tool_result_line, reply];
+        let (sys, _bank) = make_sys(10);
+        let (text, count) = sys.build_chat_text_and_count(&lines);
+
+        // 工具行不计入可见台词：只有用户消息 + 助手正文 2 条
+        assert_eq!(count, 2);
+        // 压缩文本不含工具 JSON
+        assert!(!text.contains("tool_call_id"));
+        assert!(!text.contains("web_search"));
+        // 真正对话内容保留
+        assert!(text.contains("帮我查一下天气"));
+        assert!(text.contains("今天天气不错"));
     }
 }
