@@ -397,39 +397,47 @@ impl ScriptManager {
                 }
             };
 
-            // Check if role already exists in DB — same key that creation uses.
+            // 取剧本角色 ID：优先复用数据库中已存在的同 key（script_key + script_role_key）
+            // 角色，不存在则新建。**已存在角色也要继续走「加载 + 补 SYSTEM 人设行」流程**——
+            // 否则剧本后续运行时该角色只有 DB 记录、运行时 line_list 里没有系统人设台词，
+            // role.memory 无人设、LLM 不按【情绪】格式输出，AI 回复整段被丢弃
+            // （表现：思考提示后「AI 正要吐字、剧本跳到了下一个事件」+ 人设丢失告警）。
             let path_key = script.path_key();
-            let existing = RoleRepo::get_role_by_script_keys(ctx.db, &path_key, &role_key).await?;
+            let role_id = match RoleRepo::get_role_by_script_keys(ctx.db, &path_key, &role_key).await?
+            {
+                Some(existing) => {
+                    tracing::info!(
+                        "[ScriptManager] 角色已存在: script={}, role_key={}, id={}",
+                        path_key,
+                        role_key,
+                        existing.id
+                    );
+                    existing.id
+                }
+                None => {
+                    // Register role in DB via RoleRepo
+                    let role_id = RoleRepo::find_or_create_role(
+                        ctx.db,
+                        &settings.ai_name,
+                        RoleType::Npc,
+                        Some(&path_key),
+                        Some(&role_key),
+                        Some(&role_folder),
+                    )
+                    .await?;
 
-            if existing.is_some() {
-                tracing::info!(
-                    "[ScriptManager] 角色已存在: script={}, role_key={}",
-                    path_key,
-                    role_key
-                );
-                continue;
-            }
+                    tracing::info!(
+                        "[ScriptManager] 注册剧本角色: {} (id={}, script={}, role_key={})",
+                        settings.ai_name,
+                        role_id,
+                        path_key,
+                        role_key
+                    );
+                    role_id
+                }
+            };
 
-            // Register role in DB via RoleRepo
-            let role_id = RoleRepo::find_or_create_role(
-                ctx.db,
-                &settings.ai_name,
-                RoleType::Npc,
-                Some(&path_key),
-                Some(&role_key),
-                Some(&role_folder),
-            )
-            .await?;
-
-            tracing::info!(
-                "[ScriptManager] 注册剧本角色: {} (id={}, script={}, role_key={})",
-                settings.ai_name,
-                role_id,
-                path_key,
-                role_key
-            );
-
-            // Load the role into RoleManager
+            // Load the role into RoleManager（已存在角色同样要加载，立绘/名字/记忆才可用）
             let _ = ctx
                 .game_status
                 .lock()
@@ -437,7 +445,7 @@ impl ScriptManager {
                 .get_role(ctx.db, role_id)
                 .await?;
 
-            // Add system prompt line for this role
+            // Add system prompt line for this role（新老角色一视同仁：缺人设行就补）
             let prompt = settings.system_prompt.clone().unwrap_or_default();
             let prompt_options = PromptOptions {
                 output_sec_lang: true,

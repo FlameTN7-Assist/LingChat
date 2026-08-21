@@ -343,16 +343,27 @@ pub async fn load_save(app: AppHandle, save_id: i32) -> Result<WebInitData, Stri
     {
         use crate::ai_service::types::{GameLine, LineAttributeExt, LineBase};
         use crate::db::entities::line::LineAttribute;
-        let mut gs = service.game_status.lock().await;
-        let mut involved: std::collections::HashSet<i32> = std::collections::HashSet::new();
-        for l in gs.line_list.iter() {
-            if let Some(sid) = l.base.sender_role_id {
-                if sid != 0 {
-                    involved.insert(sid);
+        // 先收集涉及角色（有台词/在场的），并确保其已加载到 RoleManager——
+        // 补建需要 role.settings.system_prompt，未加载的角色无法补
+        // （如已下场且无记忆库、第 7.5 步没覆盖到的剧本 NPC）。
+        let involved: std::collections::HashSet<i32> = {
+            let gs = service.game_status.lock().await;
+            let mut ids: std::collections::HashSet<i32> = std::collections::HashSet::new();
+            for l in gs.line_list.iter() {
+                if let Some(sid) = l.base.sender_role_id {
+                    if sid != 0 {
+                        ids.insert(sid);
+                    }
                 }
             }
+            ids.extend(gs.present_role_ids.iter().copied());
+            ids
+        };
+        for rid in &involved {
+            let _ = service.game_status.lock().await.get_role(db, *rid).await;
         }
-        involved.extend(gs.present_role_ids.iter().copied());
+
+        let mut gs = service.game_status.lock().await;
         let has_system: std::collections::HashSet<i32> = gs
             .line_list
             .iter()
