@@ -239,7 +239,9 @@ impl ScriptEvent for FreeDialogueEvent {
             }
 
             // ---- 调用 AI 生成回复（失败不踢出：自动重试 3 次后等玩家点「继续」重试） ----
-            generate_with_retry(ctx, &generator).await?;
+            // 回复文本不在此保存：每轮回复按句写入 line_list（存档含完整轮次），
+            // 读档续轮时历史即已还原，无需额外保存整条。
+            let _ = generate_with_retry(ctx, &generator).await?;
 
             // 本轮完成：把轮次写回 vars，读档续跑据此从下一轮继续
             // （存档在「本轮 input 已显示但未输入」时，vars 仍是上一轮值 → 续跑重新进入本轮）

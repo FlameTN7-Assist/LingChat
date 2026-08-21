@@ -103,14 +103,16 @@ pub type SharedScriptChannels = Arc<Mutex<ScriptChannels>>;
 ///
 /// 重试回溯点正确：失败时调用方的事件进度未前进、`add_assistant_line` 未执行
 /// （line_list 无残留），重新生成的 LLM 上下文与首次一致。
+///
+/// 返回 LLM 生成的完整回复文本（accumulated response），供调用方保存/展示。
 pub async fn generate_with_retry(
     ctx: &mut ScriptContext<'_>,
     generator: &crate::ai_service::message_system::generator::MessageGenerator,
-) -> Result<()> {
+) -> Result<String> {
     let mut attempt: u64 = 0;
     loop {
         match generator.process_message(None).await {
-            Ok(_) => return Ok(()),
+            Ok(acc) => return Ok(acc),
             Err(e) => {
                 attempt += 1;
                 tracing::warn!(

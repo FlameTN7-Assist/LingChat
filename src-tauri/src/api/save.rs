@@ -5,7 +5,6 @@ use crate::ai_service::game_system::game_status::GameStatusSnapshot;
 use crate::api::game::build_web_init_data;
 use crate::api::game::WebInitData;
 use crate::config::AppConfig;
-use crate::db::entities::line::LineAttribute;
 use crate::db::managers::role_repo::RoleRepo;
 use crate::db::managers::save_repo::SaveRepo;
 use crate::utils::prompt::PromptOptions;
@@ -425,82 +424,21 @@ pub async fn load_save(app: AppHandle, save_id: i32) -> Result<WebInitData, Stri
                     };
                     p.exists()
                 };
-                let (restore_chapter, restore_seq, from_player_read) =
-                    match rs.player_read_chapter.as_deref() {
-                        Some(ch) if !ch.is_empty() && chapter_exists(ch) => (
-                            rs.player_read_chapter.clone().unwrap_or_default(),
-                            rs.player_read_sequence.unwrap_or(rs.event_sequence),
-                            true,
-                        ),
-                        _ => (rs.current_chapter.clone(), rs.event_sequence, false),
-                    };
+                let (restore_chapter, restore_seq) = match rs.player_read_chapter.as_deref() {
+                    Some(ch) if !ch.is_empty() && chapter_exists(ch) => (
+                        rs.player_read_chapter.clone().unwrap_or_default(),
+                        rs.player_read_sequence.unwrap_or(rs.event_sequence),
+                    ),
+                    _ => (rs.current_chapter.clone(), rs.event_sequence),
+                };
 
                 script.current_chapter_key = restore_chapter.clone();
                 script.current_event_process = restore_seq;
+                // 注意：恢复位置指向 AI 对话事件时**不跳过、不前进**——ai_dialogue 事件
+                // 执行时会检查是否已保存完整回复（__ai_reply_<事件索引>）：有则直接展示
+                // 原回复（不重新调 LLM），无则正常生成。这样实现「保存当前语句、下次接上」，
+                // 玩家读档后从当前语句继续剧情。
 
-                // 读档续跑：若恢复位置来自「玩家阅读位置」且指向「AI 对话」事件，
-                // **仅当**该事件的回复已完整生成（line_list 末尾是 assistant 行——
-                // add_assistant_line 在回复最后一句 is_final 时写入）才前进一位跳过：
-                // 此时玩家已看完全部回复，跳过不会跳剧情，且避免读档后重新调用 LLM
-                // （数秒延迟、内容变化、网络失败中断剧本）。
-                // 若回复未生成完（玩家读到一半就存档），则**不跳过**、正常重放重新生成
-                // ——宁可重放也绝不跳剧情（这是 issue 的初衷）。
-                if from_player_read {
-                    let chapter_path = if restore_chapter.ends_with(".yaml") {
-                        script.script_path.join("Chapters").join(&restore_chapter)
-                    } else {
-                        script
-                            .script_path
-                            .join("Chapters")
-                            .join(format!("{}.yaml", restore_chapter))
-                    };
-                    if let Ok(content) = std::fs::read_to_string(&chapter_path) {
-                        if let Ok(serde_yaml::Value::Mapping(map)) =
-                            serde_yaml::from_str::<serde_yaml::Value>(&content)
-                        {
-                            if let Some(serde_yaml::Value::Sequence(events)) = map.get("events") {
-                                if let Some(serde_yaml::Value::Mapping(ev)) =
-                                    events.get(restore_seq.max(0) as usize)
-                                {
-                                    if ev.get("type").and_then(|v| v.as_str())
-                                        == Some("ai_dialogue")
-                                    {
-                                        // 精确判断该 AI 对话的回复是否已完整生成：
-                                        // 1) 新逻辑：vars 里有 __ai_reply_<seq>（生成成功时写入，
-                                        //    连续 ai_dialogue 也不会误判为上一个事件的回复）；
-                                        // 2) 兼容旧档（无该标记）：回退到 line_list 末尾 assistant 粗判断。
-                                        let vars = serde_json::from_str::<serde_json::Map<
-                                            String,
-                                            serde_json::Value,
-                                        >>(&rs.variable_info)
-                                        .unwrap_or_default();
-                                        let reply_complete = vars.contains_key(&format!(
-                                            "__ai_reply_{}",
-                                            restore_seq
-                                        )) || {
-                                            let gs = service.game_status.lock().await;
-                                            gs.line_list.last().map_or(false, |l| {
-                                                matches!(l.attribute(), LineAttribute::Assistant)
-                                            })
-                                        };
-                                        if reply_complete {
-                                            script.current_event_process += 1;
-                                            tracing::info!(
-                                                "[LoadSave] 恢复位置指向已完整生成的 AI 对话事件（#{}），前进一位跳过，不重新调用 LLM",
-                                                restore_seq
-                                            );
-                                        } else {
-                                            tracing::info!(
-                                                "[LoadSave] 恢复位置指向 AI 对话事件（#{}）但回复未生成完，正常重放重新生成（不跳剧情）",
-                                                restore_seq
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
                 script.vars = serde_json::from_str(&rs.variable_info).unwrap_or_default();
                 let mut gs = service.game_status.lock().await;
                 gs.script_status = Some(script);

@@ -3,7 +3,7 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use serde_json::Value;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use crate::ai_service::game_system::script_engine::events::{
     generate_with_retry, parse_duration, register_event, ScriptContext, ScriptEvent,
@@ -11,6 +11,9 @@ use crate::ai_service::game_system::script_engine::events::{
 use crate::ai_service::game_system::script_engine::utils::script_function;
 use crate::ai_service::message_system::generator::{
     GeneratorDeps, GeneratorSource, MessageGenerator,
+};
+use crate::ai_service::message_system::responses::{
+    event_names::AI_REPLY, ReplyResponse,
 };
 use crate::ai_service::types::{LineAttributeExt, LineBase};
 use crate::db::entities::line::LineAttribute;
@@ -112,22 +115,41 @@ impl ScriptEvent for AIDialogueEvent {
 
         let generator = MessageGenerator::new(deps);
 
-        // LLM 调用失败**绝不踢出玩家**：自动重试 3 次后广播「重试」提示、等玩家点
-        // 「继续」再试（详见 generate_with_retry 的注释：不跳过对话、不退出剧本，
-        // 重试回溯点正确——进度停在当前事件、line_list 无残留）。
-        generate_with_retry(ctx, &generator).await?;
+        // 读档回到当前语句：若该事件已保存完整回复（__ai_reply_<事件索引> 存的是
+        // 回复文本），直接展示保存的回复（不重新调 LLM、不跳过）——玩家读档后看到
+        // 原回复，从当前语句继续剧情。
+        let saved_reply = {
+            let gs = ctx.game_status.lock().await;
+            gs.script_status
+                .as_ref()
+                .and_then(|ss| {
+                    ss.vars
+                        .get(&format!("__ai_reply_{}", ss.current_event_process))
+                })
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        };
 
-        // 记录该 AI 对话的回复已完整生成（key 带事件索引）：
-        // 读档续跑时据此精确判断「是否跳过该事件」（不重新调 LLM）——比用
-        // line_list 末尾 assistant 粗判断更可靠（连续 ai_dialogue 时末尾可能是
-        // 上一个事件的回复，粗判断会误判）。中断/失败未生成完则不会记录。
-        {
-            let mut gs = ctx.game_status.lock().await;
-            if let Some(ref mut ss) = gs.script_status {
-                ss.vars.insert(
-                    format!("__ai_reply_{}", ss.current_event_process),
-                    serde_json::json!(true),
-                );
+        if let Some(text) = saved_reply {
+            emit_saved_reply(ctx, role_id, &text).await;
+            tracing::info!(
+                "[AIDialogueEvent] 展示已保存的回复（读档回到当前语句），不重新调用 LLM"
+            );
+        } else {
+            // LLM 调用失败**绝不踢出玩家**：自动重试 3 次后广播「重试」提示、等玩家点
+            // 「继续」再试（详见 generate_with_retry 的注释：不跳过对话、不退出剧本，
+            // 重试回溯点正确——进度停在当前事件、line_list 无残留）。
+            let reply_text = generate_with_retry(ctx, &generator).await?;
+            // 保存完整回复文本（key 带事件索引，读档回到当前语句用；
+            // 中断/失败未生成完则不会走到这里、不保存）
+            {
+                let mut gs = ctx.game_status.lock().await;
+                if let Some(ref mut ss) = gs.script_status {
+                    ss.vars.insert(
+                        format!("__ai_reply_{}", ss.current_event_process),
+                        serde_json::json!(reply_text),
+                    );
+                }
             }
         }
 
@@ -143,6 +165,37 @@ impl ScriptEvent for AIDialogueEvent {
     fn duration(&self) -> Option<f64> {
         self.duration
     }
+}
+
+/// 把保存的 AI 回复重新广播为 ai:reply 事件（读档回到当前语句时展示原回复）。
+async fn emit_saved_reply(ctx: &mut ScriptContext<'_>, role_id: i32, text: &str) {
+    let role_name = {
+        let gs = ctx.game_status.lock().await;
+        gs.role_manager
+            .get_loaded(role_id)
+            .and_then(|r| r.display_name.clone())
+            .unwrap_or_default()
+    };
+    let resp = ReplyResponse {
+        type_: "reply".into(),
+        duration: -1.0,
+        is_final: true,
+        character: Some(role_name.clone()),
+        role_id: Some(role_id),
+        emotion: String::new(),
+        original_tag: String::new(),
+        message: text.to_string(),
+        tts_text: None,
+        motion_text: None,
+        audio_file: None,
+        original_message: text.to_string(),
+        display_name: Some(role_name),
+        display_subtitle: None,
+        user_message_seq: None,
+        thinking: None,
+        preview_gen: None,
+    };
+    let _ = ctx.app.emit(AI_REPLY, &resp);
 }
 
 pub fn register() {
