@@ -437,13 +437,22 @@ impl ScriptManager {
                 }
             };
 
-            // Load the role into RoleManager（已存在角色同样要加载，立绘/名字/记忆才可用）
-            let _ = ctx
+            // Load the role into RoleManager（已存在角色同样要加载，立绘/名字/记忆才可用；
+            // 加载失败只告警不中断——剧本仍可继续，人设行照常按 settings.yml 注入）
+            if let Err(e) = ctx
                 .game_status
                 .lock()
                 .await
                 .get_role(ctx.db, role_id)
-                .await?;
+                .await
+            {
+                tracing::warn!(
+                    "[ScriptManager] 剧本角色加载失败: script={}, role_key={}: {}",
+                    path_key,
+                    role_key,
+                    e
+                );
+            }
 
             // Add system prompt line for this role（新老角色一视同仁：缺人设行就补）
             let prompt = settings.system_prompt.clone().unwrap_or_default();
