@@ -53,6 +53,8 @@ export interface ScriptFreeDialogueEvent extends ScriptEvent {
   switch: boolean
   maxRounds: number
   endLine: string
+  /** 读档续轮时已进行的轮次（后端 saved_rounds）；前端据此同步 currentRound 显示 */
+  currentRound?: number
 }
 
 export interface ScriptBackgroundEvent extends ScriptEvent {

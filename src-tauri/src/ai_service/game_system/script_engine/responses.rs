@@ -196,6 +196,10 @@ pub struct FreeDialoguePayload {
     pub switch: bool,
     pub max_rounds: i32,
     pub end_line: String,
+    /// 读档续轮时已进行的轮次（saved_rounds）。前端据此同步 currentRound 显示，
+    /// 避免续跑后前端提示停留在 0/N 而后端已到第 N 轮。正常新跑时为 0。
+    #[serde(default)]
+    pub current_round: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration: Option<f64>,
 }

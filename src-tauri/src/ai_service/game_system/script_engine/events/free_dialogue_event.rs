@@ -120,6 +120,8 @@ impl ScriptEvent for FreeDialogueEvent {
             switch: true,
             max_rounds: self.max_rounds,
             end_line: self.end_line.clone(),
+            // 读档续轮：把已进行轮次带给前端，同步 currentRound 显示
+            current_round: saved_rounds,
             duration: self.duration,
         };
         let _ = emit(ctx.app, SCRIPT_FREE_DIALOGUE, &start_payload);
@@ -258,6 +260,7 @@ impl ScriptEvent for FreeDialogueEvent {
             switch: false,
             max_rounds: self.max_rounds,
             end_line: self.end_line.clone(),
+            current_round: 0,
             duration: self.duration,
         };
         let _ = emit(ctx.app, SCRIPT_FREE_DIALOGUE, &end_payload);

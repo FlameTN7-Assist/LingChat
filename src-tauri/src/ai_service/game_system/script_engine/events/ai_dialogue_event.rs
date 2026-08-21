@@ -117,6 +117,20 @@ impl ScriptEvent for AIDialogueEvent {
         // 重试回溯点正确——进度停在当前事件、line_list 无残留）。
         generate_with_retry(ctx, &generator).await?;
 
+        // 记录该 AI 对话的回复已完整生成（key 带事件索引）：
+        // 读档续跑时据此精确判断「是否跳过该事件」（不重新调 LLM）——比用
+        // line_list 末尾 assistant 粗判断更可靠（连续 ai_dialogue 时末尾可能是
+        // 上一个事件的回复，粗判断会误判）。中断/失败未生成完则不会记录。
+        {
+            let mut gs = ctx.game_status.lock().await;
+            if let Some(ref mut ss) = gs.script_status {
+                ss.vars.insert(
+                    format!("__ai_reply_{}", ss.current_event_process),
+                    serde_json::json!(true),
+                );
+            }
+        }
+
         tracing::info!("[AIDialogueEvent] 执行完毕");
 
         Ok(None)

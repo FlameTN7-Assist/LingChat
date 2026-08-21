@@ -465,13 +465,22 @@ pub async fn load_save(app: AppHandle, save_id: i32) -> Result<WebInitData, Stri
                                     if ev.get("type").and_then(|v| v.as_str())
                                         == Some("ai_dialogue")
                                     {
-                                        let reply_complete = {
+                                        // 精确判断该 AI 对话的回复是否已完整生成：
+                                        // 1) 新逻辑：vars 里有 __ai_reply_<seq>（生成成功时写入，
+                                        //    连续 ai_dialogue 也不会误判为上一个事件的回复）；
+                                        // 2) 兼容旧档（无该标记）：回退到 line_list 末尾 assistant 粗判断。
+                                        let vars = serde_json::from_str::<serde_json::Map<
+                                            String,
+                                            serde_json::Value,
+                                        >>(&rs.variable_info)
+                                        .unwrap_or_default();
+                                        let reply_complete = vars.contains_key(&format!(
+                                            "__ai_reply_{}",
+                                            restore_seq
+                                        )) || {
                                             let gs = service.game_status.lock().await;
                                             gs.line_list.last().map_or(false, |l| {
-                                                matches!(
-                                                    l.attribute(),
-                                                    LineAttribute::Assistant
-                                                )
+                                                matches!(l.attribute(), LineAttribute::Assistant)
                                             })
                                         };
                                         if reply_complete {

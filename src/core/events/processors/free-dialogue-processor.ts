@@ -20,6 +20,9 @@ export default class FreeDialogueProcessor implements IEventProcessor {
     if (freeDialogue.isFreeDialogue) {
       freeDialogue.maxRounds = event.maxRounds
       freeDialogue.endLine = event.endLine
+      // 读档续轮：同步后端已进行的轮次（saved_rounds），避免续跑后前端提示
+      // 停留在 0/N 而后端已到第 N 轮。正常新跑时后端给 0。
+      freeDialogue.currentRound = event.currentRound ?? 0
     } else {
       freeDialogue.currentRound = 0
       freeDialogue.maxRounds = 0
