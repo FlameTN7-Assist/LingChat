@@ -287,6 +287,14 @@ export function convertInitLines(lines: GameLineInit[]): GameMessage[] {
 
     return {
       type: (line.attribute === 'user' ? 'message' : 'reply') as 'message' | 'reply',
+      messageType:
+        line.attribute === 'user'
+          ? ('player' as const)
+          : line.attribute === 'assistant'
+            ? ('ai' as const)
+            : line.attribute === 'system'
+              ? ('system' as const)
+              : undefined,
       displayName: line.display_name || '',
       content: filteredContent,
       emotion: line.predicted_emotion || undefined,

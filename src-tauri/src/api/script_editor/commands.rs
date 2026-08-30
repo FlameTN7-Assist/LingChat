@@ -1735,16 +1735,24 @@ async fn build_main_role_prompt(
             role_id
         );
     }
-    // 用 by_settings 版本而不是自己拼参数：它会一并带上 settings.user_name，
-    // 与正式游玩走的是同一条构建路径
+    // 用 by_settings 版本而不是自己拼参数：它会一并带上玩家名，
+    // 与正式游玩走的是同一条构建路径（玩家名从全局 player_profile 读取）
     Some(MainRolePrompt {
-        text: sys_prompt_builder_by_settings(
-            &settings,
-            PromptOptions {
-                output_sec_lang: true,
-                no_emotion_limit: true,
-            },
-        ),
+        text: {
+            let player_name =
+                crate::db::managers::player_profile_repo::PlayerProfileRepo::get_profile(db)
+                    .await
+                    .map(|p| p.user_name)
+                    .unwrap_or_default();
+            sys_prompt_builder_by_settings(
+                &settings,
+                Some(&player_name),
+                PromptOptions {
+                    output_sec_lang: true,
+                    no_emotion_limit: true,
+                },
+            )
+        },
         name: settings.ai_name,
     })
 }

@@ -351,6 +351,7 @@ function sendUserPrompt(text: string) {
   const userMessageIndex = gameStore.dialogHistory.length
   gameStore.appendGameMessage({
     type: 'message',
+    messageType: 'player',
     displayName: gameStore.userName,
     content,
   })

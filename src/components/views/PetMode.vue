@@ -235,6 +235,7 @@ onUnmounted(() => {
 const handleMessageSent = (message: string) => {
   gameStore.appendGameMessage({
     type: 'message',
+    messageType: 'player',
     displayName: gameStore.userName,
     content: message,
   })

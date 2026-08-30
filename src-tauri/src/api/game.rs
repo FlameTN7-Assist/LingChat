@@ -681,8 +681,9 @@ pub async fn add_role_to_scene(app: AppHandle, role_id: i32) -> Result<JsonValue
             .clone()
             .unwrap_or_else(|| format!("角色{}", role_id));
 
-        // 构建角色的 system prompt
-        let system_prompt = sys_prompt_builder_by_settings(&role.settings, prompt_options);
+        // 构建角色的 system prompt（玩家名从全局 player_profile 读取，解耦玩家与 AI）
+        let player_name = gs.player.user_name.clone();
+        let system_prompt = sys_prompt_builder_by_settings(&role.settings, Some(&player_name), prompt_options);
 
         // ★ 注入 System 行必须在 onstage_role 之前。
         //    仅当台词表中不存在本角色的 System 行时才添加（避免退出后重入时重复）。
