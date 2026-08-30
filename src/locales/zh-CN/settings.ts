@@ -64,10 +64,10 @@ export default {
   },
   character: {
     playerProfile: {
-      title: '玩家档案',
       userName: '玩家名称',
-      userNamePlaceholder: '输入玩家名称',
+      title: '玩家档案',
       userSubtitle: '玩家副标题',
+      userNamePlaceholder: '输入玩家名称',
       userSubtitlePlaceholder: '输入玩家副标题',
       save: '保存玩家档案',
       saved: '玩家档案已保存',
@@ -383,8 +383,6 @@ export default {
     fields: {
       aiName: 'AI 名称',
       aiSubtitle: 'AI 副标题',
-      userName: '用户名称',
-      userSubtitle: '用户副标题',
       title: '角色标题',
       info: '角色介绍',
       systemPrompt: '系统提示词',
@@ -493,8 +491,6 @@ export default {
       aiNamePlaceholder: '角色对话名称',
       aiSubtitle: 'AI 副标题',
       aiSubtitlePlaceholder: '例如: 守夜人 / 学园偶像',
-      userName: '用户名称',
-      userSubtitle: '用户副标题',
       info: '角色简介',
       infoPlaceholder: '可选：用于角色介绍展示',
     },

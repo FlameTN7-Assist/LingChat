@@ -64,10 +64,10 @@ export default {
   },
   character: {
     playerProfile: {
+      userName: 'Player Name',
       title: "Player Profile",
-      userName: "Player Name",
+      userSubtitle: 'Player Subtitle',
       userNamePlaceholder: "Enter player name",
-      userSubtitle: "Player Subtitle",
       userSubtitlePlaceholder: "Enter player subtitle",
       save: "Save Player Profile",
       saved: "Player profile saved",
@@ -267,7 +267,10 @@ export default {
       TODO_WEIGHT: "TODO_WEIGHT — Trigger weight for TODO reminders (default 10)",
       ENABLE_SCHEDULE_REMINDER: "ENABLE_SCHEDULE_REMINDER — Enable schedule reminders with popup time announcements",
       ENABLE_IMPORTANT_DAY_REMINDER: "ENABLE_IMPORTANT_DAY_REMINDER — Enable heartwarming reminders for holidays and special days",
-    },
+
+      display: {
+        disable_splash_animation: 'DISABLE_SPLASH_ANIMATION — Disable the first-launch splash animation (cat paw loading animation)',
+      },    },
   },
   workshop: {
     title: "Workshop",
@@ -350,8 +353,6 @@ export default {
     fields: {
       aiName: "AI Name",
       aiSubtitle: "AI Subtitle",
-      userName: "User Name",
-      userSubtitle: "User Subtitle",
       title: "Character Title",
       info: "Character Bio",
       systemPrompt: "System Prompt",
@@ -460,8 +461,6 @@ export default {
       aiNamePlaceholder: "Name used in conversations",
       aiSubtitle: "AI Subtitle",
       aiSubtitlePlaceholder: "e.g. Night Watcher / School Idol",
-      userName: "User Name",
-      userSubtitle: "User Subtitle",
       info: "Character Bio",
       infoPlaceholder: "Optional: shown in the character introduction",
     },

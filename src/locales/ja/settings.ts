@@ -63,10 +63,10 @@ export default {
   },
   character: {
     playerProfile: {
-      title: 'プレイヤープロフィール',
       userName: 'プレイヤー名',
-      userNamePlaceholder: 'プレイヤー名を入力',
+      title: 'プレイヤープロフィール',
       userSubtitle: 'プレイヤーサブタイトル',
+      userNamePlaceholder: 'プレイヤー名を入力',
       userSubtitlePlaceholder: 'プレイヤーサブタイトルを入力',
       save: 'プレイヤープロフィールを保存',
       saved: 'プレイヤープロフィールを保存しました',
@@ -266,7 +266,10 @@ export default {
       TODO_WEIGHT: 'TODO_WEIGHT — TODO リマインドの発動重み（デフォルト 10）',
       ENABLE_SCHEDULE_REMINDER: 'ENABLE_SCHEDULE_REMINDER — 強制スケジュール時報ポップアップを有効化',
       ENABLE_IMPORTANT_DAY_REMINDER: 'ENABLE_IMPORTANT_DAY_REMINDER — 重要な記念日・特別な日の心温まるリマインドを有効化',
-    },
+
+      display: {
+        disable_splash_animation: 'DISABLE_SPLASH_ANIMATION — 起動時のスプラッシュアニメーション（猫の爪ローディングアニメ）を無効にする',
+      },    },
   },
   workshop: {
     title: 'ワークショップ',
@@ -349,8 +352,6 @@ export default {
     fields: {
       aiName: 'AI 名',
       aiSubtitle: 'AI サブタイトル',
-      userName: 'ユーザー名',
-      userSubtitle: 'ユーザーサブタイトル',
       title: 'キャラクタータイトル',
       info: 'キャラクター紹介',
       systemPrompt: 'システムプロンプト',
@@ -458,8 +459,6 @@ export default {
       aiNamePlaceholder: 'キャラクターの会話名',
       aiSubtitle: 'AI サブタイトル',
       aiSubtitlePlaceholder: '例: 夜の番人 / スクールアイドル',
-      userName: 'ユーザー名',
-      userSubtitle: 'ユーザーサブタイトル',
       info: 'キャラクター紹介',
       infoPlaceholder: '任意：キャラクター紹介の表示に使用',
     },
