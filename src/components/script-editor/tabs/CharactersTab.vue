@@ -4,6 +4,8 @@ import { Button, Icon } from '@/components/base'
 import { MenuPage, MenuItem } from '@/components/ui'
 import { useI18n } from 'vue-i18n'
 import { useScriptEditorStore } from '@/stores/modules/script-editor'
+import { useUserStore } from '@/stores/modules/user/user'
+import { computed } from 'vue'
 
 const emit = defineEmits<{
   'new-character': []
@@ -12,6 +14,11 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const store = useScriptEditorStore()
+const userStore = useUserStore()
+
+/** 全局玩家名（解耦玩家与 AI 设定） */
+const playerName = computed(() => userStore.playerProfile?.user_name || '玩家')
+const playerSubtitle = computed(() => userStore.playerProfile?.user_subtitle || '')
 
 /** 绝对路径 → webview 能加载的 asset URL，与 GameBackground / GameRoleAvatar 同一套 */
 const assetUrl = (path: string) => convertFileSrc(path)
@@ -19,6 +26,29 @@ const assetUrl = (path: string) => convertFileSrc(path)
 
 <template>
   <MenuPage>
+    <!-- 玩家档案（解耦玩家与 AI 设定）：剧本作者可查看全局玩家身份 -->
+    <MenuItem :title="t('scriptEditor.characters.playerSection')">
+      <template #header>
+        <Icon icon="sliders" :size="20" />
+      </template>
+      <div
+        class="w-full border border-white/10 rounded-[10px] px-[13px] py-[11px] bg-white/6 flex items-center gap-3"
+      >
+        <div
+          class="shrink-0 w-11 h-11 rounded-full border-[1.5px] border-amber-400/35 flex items-center justify-center bg-white/5"
+        >
+          <Icon icon="sliders" :size="18" />
+        </div>
+        <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span class="font-semibold text-white">{{ playerName }}</span>
+          <span v-if="playerSubtitle" class="text-xs text-white/45">{{ playerSubtitle }}</span>
+          <span class="text-xs text-white/30">
+            {{ t('scriptEditor.characters.playerHint') }}
+          </span>
+        </div>
+      </div>
+    </MenuItem>
+
     <MenuItem :title="t('scriptEditor.characters.menuTitle')">
       <template #header>
         <Icon

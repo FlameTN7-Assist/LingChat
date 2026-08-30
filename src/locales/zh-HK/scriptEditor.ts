@@ -235,6 +235,8 @@ export default {
     },
   },
   characters: {
+    playerSection: '玩家檔案',
+    playerHint: '劇本運行時玩家的默認身份（可在劇本中用「切換玩家身份」事件臨時覆蓋）',
     menuTitle: '劇本內角色',
     empty: '還沒有任何劇本內角色，點下方新建或從全局角色庫匯入',
     noLocalAvatar: '本劇本沒複製立繪，但全局角色庫裡有；引擎會自動用全局那份',

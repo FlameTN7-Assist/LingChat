@@ -237,6 +237,8 @@ export default {
   },
   characters: {
     menuTitle: '剧本内角色',
+    playerSection: '玩家档案',
+    playerHint: '剧本运行时玩家的默认身份（可在剧本中用「切换玩家身份」事件临时覆盖）',
     empty: '还没有任何剧本内角色，点下方新建或从全局角色库导入',
     noLocalAvatar: '本剧本没复制立绘，但全局角色库里有；引擎会自动用全局那份',
     clothes: ' · {count} 套服装',
