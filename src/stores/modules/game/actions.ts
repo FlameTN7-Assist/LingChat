@@ -5,6 +5,7 @@ import type { GameLineInit, WebInitData } from '../../../api/services/game-info'
 import { getRoleInfo } from '../../../api/services/character'
 import { useUIStore } from '../ui/ui'
 import { useSettingsStore } from '../settings'
+import { useUserStore } from '../user/user'
 import type { SceneInfo } from '@/api/services/scene'
 import { invoke } from '@tauri-apps/api/core'
 
@@ -24,6 +25,19 @@ setGameMessages(this: GameState, messages: GameMessage[]) {
     try {
       const gameInfo = await getGameInfo()
       applyWebInitData(this, gameInfo)
+      // 加载全局玩家档案到 user store（解耦玩家与 AI 设定）
+      const userStore = useUserStore()
+      if (gameInfo.player_profile) {
+        userStore.playerProfile = {
+          user_name: gameInfo.player_profile.user_name || '玩家',
+          user_subtitle: gameInfo.player_profile.user_subtitle || '',
+          user_prompt: gameInfo.player_profile.user_prompt || '',
+        }
+        userStore.profileLoaded = true
+      } else {
+        // fallback：后端旧版本没有 player_profile，尝试从 API 拉取
+        await userStore.loadPlayerProfile()
+      }
       // 通知后端玩家已入场，触发 AI 问候（不等 LoadingTransition，fire-and-forget）
       invoke('notify_player_entry').catch((err) =>
         console.warn('[Entry] 问候触发失败（非致命）:', err),
@@ -203,8 +217,9 @@ export function applyWebInitData(state: GameState, gameInfo: WebInitData): void 
 
   const uiStore = useUIStore()
   const settingsStore = useSettingsStore()
-  state.userName = characterInfo.user_name
-  state.userSubtitle = characterInfo.user_subtitle
+  // 玩家身份：优先从 player_profile 读取（解耦），fallback 到 character_settings 兼容旧数据
+  state.userName = gameInfo.player_profile?.user_name ?? characterInfo.user_name
+  state.userSubtitle = gameInfo.player_profile?.user_subtitle ?? characterInfo.user_subtitle
 
   uiStore.showCharacterTitle = characterInfo.ai_name
   uiStore.showCharacterSubtitle = characterInfo.ai_subtitle

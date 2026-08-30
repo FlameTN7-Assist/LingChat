@@ -16,6 +16,7 @@ use crate::ai_service::tts::local::LocalTtsRuntime;
 use crate::ai_service::types::{CharacterSettings, GameLine, LineAttributeExt, LineBase};
 use crate::config::tts::TtsConfig;
 use crate::db::entities::line::LineAttribute;
+use crate::db::managers::player_profile_repo::PlayerProfileRepo;
 use crate::utils::prompt::{sys_prompt_builder, PromptOptions};
 
 /// AI 服务：承载 `GameStatus` 与会话级配置。
@@ -100,6 +101,9 @@ impl AIService {
     /// `prompt_options` 控制对话格式提示（日语开关、情绪放开）。
     /// 调用方（通常是 Tauri command）从 AppConfig 读取后传入。
     /// 钦灵：TODO，这一段代码是老函数，新版已经不是单一人物，而是多个人物，这部分代码之后需要清理。
+    ///
+    /// 解耦玩家与 AI：玩家身份不再从 CharacterSettings 中读取，
+    /// 而是从全局 player_profile 表加载（fallback 到 CharacterSettings 以兼容旧数据）。
     pub async fn import_settings(
         &mut self,
         settings: CharacterSettings,
@@ -112,12 +116,31 @@ impl AIService {
         self.character_id = settings.character_id;
         self.ai_name = settings.ai_name.clone();
         self.ai_subtitle = settings.ai_subtitle.clone();
-        self.user_name = settings.user_name.clone();
-        self.user_subtitle = settings.user_subtitle.clone();
         let base_prompt = settings.system_prompt.clone().unwrap_or(default_prompt);
         self.ai_prompt_example = settings.system_prompt_example.clone();
         self.ai_prompt_example_old = settings.system_prompt_example_old.clone();
         self.clothes_name = settings.clothes_name.clone(); // TODO: 这个是冗余的，之后可以去掉
+
+        // 玩家身份从全局 player_profile 表加载（解耦：不再从角色 settings.yml 读取）
+        let (user_name, user_subtitle) = {
+            match crate::db::managers::player_profile_repo::PlayerProfileRepo::get_profile(&self.db)
+                .await
+            {
+                Ok(profile) => {
+                    let uname = profile.user_name;
+                    let usub = profile.user_subtitle.unwrap_or_default();
+                    (uname, usub)
+                }
+                Err(e) => {
+                    tracing::warn!("读取玩家档案失败，回退到角色设置: {e}");
+                    // 回退到旧行为：从 CharacterSettings 读（兼容老版本数据）
+                    (settings.user_name.clone(), settings.user_subtitle.clone().unwrap_or_default())
+                }
+            }
+        };
+
+        self.user_name = user_name.clone();
+        self.user_subtitle = if user_subtitle.is_empty() { None } else { Some(user_subtitle.clone()) };
 
         self.ai_prompt = sys_prompt_builder(
             &self.user_name,

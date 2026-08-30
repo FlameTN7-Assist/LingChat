@@ -17,11 +17,21 @@ use crate::ai_service::types::{
 use crate::config::{self, AppConfig};
 use crate::db::entities::line;
 use crate::db::entities::line::LineAttribute;
+use crate::db::managers::player_profile_repo::PlayerProfileRepo;
 use crate::db::managers::role_repo::RoleRepo;
 use crate::utils::prompt::{sys_prompt_builder_by_settings, PromptOptions, PromptRole};
 use crate::AppState;
 
 // ========== 响应类型 ==========
+
+/// 玩家档案初始化数据（对应前端 `PlayerProfile` 接口）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PlayerProfileInit {
+    pub user_name: String,
+    pub user_subtitle: String,
+    pub user_prompt: String,
+}
 
 /// 对应前端 `WebInitData`（`src/api/services/game-info.ts`）
 #[derive(Debug, Clone, Serialize)]
@@ -49,6 +59,8 @@ pub struct WebInitData {
     pub last_bgm_mode: Option<String>,
     /// 上次环境音轨道（JSON 字符串，前端解析）
     pub last_ambient_tracks: Option<String>,
+    /// 全局玩家档案（解耦玩家与 AI 设定）
+    pub player_profile: PlayerProfileInit,
 }
 
 /// 精简的角色设定，匹配前端 `CharacterSettings` 接口
@@ -579,6 +591,25 @@ pub(crate) async fn build_web_init_data(
         None
     };
 
+    // 加载全局玩家档案（解耦玩家与 AI 设定）
+    let player_profile = {
+        match PlayerProfileRepo::get_profile(db).await {
+            Ok(profile) => PlayerProfileInit {
+                user_name: profile.user_name,
+                user_subtitle: profile.user_subtitle.unwrap_or_default(),
+                user_prompt: profile.user_prompt.unwrap_or_default(),
+            },
+            Err(e) => {
+                tracing::warn!("读取玩家档案失败: {e}");
+                PlayerProfileInit {
+                    user_name: "玩家".to_string(),
+                    user_subtitle: String::new(),
+                    user_prompt: String::new(),
+                }
+            }
+        }
+    };
+
     let result = WebInitData {
         character_settings,
         current_interact_role_id: current_role_id,
@@ -595,6 +626,7 @@ pub(crate) async fn build_web_init_data(
         last_bgm_paused,
         last_bgm_mode,
         last_ambient_tracks,
+        player_profile,
     };
     Ok(result)
 }

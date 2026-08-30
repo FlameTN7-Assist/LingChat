@@ -62,6 +62,15 @@ export default {
     },
   },
   character: {
+    playerProfile: {
+      title: 'プレイヤープロフィール',
+      userName: 'プレイヤー名',
+      userNamePlaceholder: 'プレイヤー名を入力',
+      userSubtitle: 'プレイヤーサブタイトル',
+      userSubtitlePlaceholder: 'プレイヤーサブタイトルを入力',
+      save: 'プレイヤープロフィールを保存',
+      saved: 'プレイヤープロフィールを保存しました',
+    },
     list: {
       title: 'キャラクター一覧（切り替えると新しい会話が始まります）',
       noDesc: 'キャラクターの説明なし',

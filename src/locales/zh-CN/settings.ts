@@ -63,6 +63,15 @@ export default {
     },
   },
   character: {
+    playerProfile: {
+      title: '玩家档案',
+      userName: '玩家名称',
+      userNamePlaceholder: '输入玩家名称',
+      userSubtitle: '玩家副标题',
+      userSubtitlePlaceholder: '输入玩家副标题',
+      save: '保存玩家档案',
+      saved: '玩家档案已保存',
+    },
     list: {
       title: '角色列表（切换角色会开始全新对话）',
       noDesc: '暂无角色描述',

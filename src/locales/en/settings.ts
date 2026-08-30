@@ -63,6 +63,15 @@ export default {
     },
   },
   character: {
+    playerProfile: {
+      title: "Player Profile",
+      userName: "Player Name",
+      userNamePlaceholder: "Enter player name",
+      userSubtitle: "Player Subtitle",
+      userSubtitlePlaceholder: "Enter player subtitle",
+      save: "Save Player Profile",
+      saved: "Player profile saved",
+    },
     list: {
       title: "Character List (switching characters starts a brand-new conversation)",
       noDesc: "No character description yet",

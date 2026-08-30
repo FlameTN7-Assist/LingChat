@@ -617,6 +617,10 @@ pub async fn update_role_settings(
         obj.remove("character_folder");
         obj.remove("script_key");
         obj.remove("script_role_key");
+        // 解耦玩家与 AI：玩家身份不再存储在各角色 settings.yml 中
+        obj.remove("user_name");
+        obj.remove("user_subtitle");
+        obj.remove("user_prompt");
     }
 
     let yaml_path = base_path.join("settings.yml");

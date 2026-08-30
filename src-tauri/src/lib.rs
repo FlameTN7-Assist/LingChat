@@ -736,6 +736,9 @@ pub fn run() {
             api::chat::generate_line_voice,
             api::chat::feed_image,
             api::chat::feed_text,
+            // ── 玩家档案（解耦玩家与 AI）──
+            api::player::get_player_profile,
+            api::player::set_player_profile,
             api::screenshot::start_screenshot,
             api::screenshot::get_overlay_data,
             api::screenshot::confirm_screenshot,

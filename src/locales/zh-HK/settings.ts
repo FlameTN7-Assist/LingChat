@@ -63,6 +63,15 @@ export default {
     }
   },
   "character": {
+    "playerProfile": {
+      "title": "玩家檔案",
+      "userName": "玩家名稱",
+      "userNamePlaceholder": "輸入玩家名稱",
+      "userSubtitle": "玩家副標題",
+      "userSubtitlePlaceholder": "輸入玩家副標題",
+      "save": "保存玩家檔案",
+      "saved": "玩家檔案已保存"
+    },
     "list": {
       "title": "角色列表（切換角色會開始全新嘅對話）",
       "noDesc": "冇角色描述"

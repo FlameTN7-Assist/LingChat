@@ -1594,7 +1594,7 @@ impl PreviewSession {
         gs.present_role_ids.clear();
         gs.onstage_role_ids.clear();
         gs.onstage_role(main_id); // 不做这步立绘不会出现
-        // 玩家名（绑定角色卡里的 settings.user_name）。缺了它 %player% 替换为空、
+        // 玩家名（全局 player_profile 表，解耦玩家与 AI 设定）。缺了它 %player% 替换为空、
         // 前端玩家气泡也会显示空名（issue #8）。读不到就保持原值，不阻断试玩。
         let uname = user_name_of(db, main_id).await;
         if !uname.is_empty() {
@@ -1804,17 +1804,14 @@ async fn role_name_of(db: &DatabaseConnection, id: i32) -> Option<String> {
     Some(role.name)
 }
 
-/// 角色卡里写的玩家名（settings.user_name）。查不到或为空返回空串 ——
+/// 玩家名。解耦玩家与 AI：不再从角色卡 settings.yml 读取，
+/// 而是从全局 player_profile 表读取。查不到或为空返回空串 ——
 /// 试玩用它显示玩家身份、替换 %player%，缺了只是显示空，不该阻断试玩（issue #8）。
-async fn user_name_of(db: &DatabaseConnection, id: i32) -> String {
-    RoleRepo::get_role_settings_by_id(db, &data_dir(), id)
+async fn user_name_of(db: &DatabaseConnection, _id: i32) -> String {
+    use crate::db::managers::player_profile_repo::PlayerProfileRepo;
+    PlayerProfileRepo::get_profile(db)
         .await
-        .ok()
-        .flatten()
-        .and_then(|s| {
-            let n = s.user_name.trim().to_string();
-            if n.is_empty() { None } else { Some(n) }
-        })
+        .map(|p| p.user_name)
         .unwrap_or_default()
 }
 
