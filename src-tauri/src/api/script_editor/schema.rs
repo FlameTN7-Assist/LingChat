@@ -1,6 +1,6 @@
-//! 事件 schema —— 16 种事件及其全部字段的**单一真相源**。
+//! 事件 schema —— 17 种事件及其全部字段的**单一真相源**。
 //!
-//! 在这之前，同一份 schema 散落在三处：Rust 的 16 个 handler、前端
+//! 在这之前，同一份 schema 散落在三处：Rust 的 handler、前端
 //! `src/types/script.ts` 的运行时 payload 类型、原型编辑器的 `constants/events.ts`。
 //! 三者互不同步，直接导致原型产出的 `set_variable` / `chapter_end` 跑不通。
 //!
@@ -157,7 +157,7 @@ pub struct EventSpec {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScriptSchema {
-    /// 16 种事件
+    /// 17 种事件
     pub events: Vec<EventSpec>,
     /// 所有事件共有的字段（触发条件 / 事件间隔）
     pub common_fields: Vec<FieldSpec>,
@@ -327,6 +327,29 @@ pub fn build_schema() -> ScriptSchema {
             fields: vec![FieldSpec::new("options", "赋值组", FieldKind::VarOptions)
                 .required()
                 .hint("每组可带条件；与 choices 不同，这里所有满足条件的组都会执行")],
+        },
+        EventSpec {
+            type_key: "set_player_identity",
+            label: "切换玩家身份",
+            category: "流程",
+            color: "#f59e0b",
+            fields: vec![
+                FieldSpec::new("user_name", "玩家名", FieldKind::Text)
+                    .placeholder("（不填则保持当前）")
+                    .hint("剧本内临时切换叙事/对话视角。留空表示只改副标题或 prompt"),
+                FieldSpec::new("user_subtitle", "玩家副标题", FieldKind::Text)
+                    .placeholder("（不填则保持当前）"),
+                FieldSpec::new("user_prompt", "玩家提示词", FieldKind::Textarea)
+                    .hint("额外注入玩家侧的系统提示词"),
+                FieldSpec::new("scope", "作用域", FieldKind::Select)
+                    .options(["chapter", "script", "permanent"])
+                    .option_labels([
+                        "chapter（本章节结束还原）",
+                        "script（剧本结束还原）",
+                        "permanent（永久生效）",
+                    ])
+                    .default_desc("chapter"),
+            ],
         },
         EventSpec {
             type_key: "chapter_end",

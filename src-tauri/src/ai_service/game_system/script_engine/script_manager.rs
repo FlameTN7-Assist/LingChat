@@ -547,6 +547,15 @@ impl ScriptManager {
             gs.script_status = None;
         }
 
+        // 还原剧本切换过的玩家身份（set_player_identity 事件作用域到期）
+        {
+            let mut gs = ctx.game_status.lock().await;
+            if let Some(original) = gs.player_identity_override.take() {
+                gs.player = original;
+                tracing::info!("[ScriptManager] 玩家身份已还原为 '{}'", gs.player.user_name);
+            }
+        }
+
         is_running.store(false, Ordering::SeqCst);
 
         tracing::info!("[ScriptManager] 剧本状态已清除");

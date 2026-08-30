@@ -17,6 +17,11 @@ use crate::utils::prompt::PromptRole;
 pub struct GameStatus {
     pub player: Player,
 
+    /// 剧本切换玩家身份时的原始身份快照。
+    /// `set_player_identity` 事件应用新身份前保存在此，chapter_end / on_script_end
+    /// 捕获到它时还原。None 表示当前没有剧本级玩家身份切换。
+    pub player_identity_override: Option<Player>,
+
     /// 台词列表，用于记忆构建和历史记忆
     pub line_list: Vec<GameLine>,
 
@@ -68,6 +73,7 @@ impl GameStatus {
     pub fn new(role_manager: GameRoleManager) -> Self {
         Self {
             player: Player::default(),
+            player_identity_override: None,
             line_list: Vec::new(),
             role_manager,
             current_role_id: None,

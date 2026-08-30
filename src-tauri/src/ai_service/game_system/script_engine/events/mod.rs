@@ -20,6 +20,7 @@ pub mod music_event;
 pub mod narration_event;
 pub mod player_event;
 pub mod present_pic_event;
+pub mod set_player_identity_event;
 pub mod set_variable_event;
 pub mod sound_event;
 

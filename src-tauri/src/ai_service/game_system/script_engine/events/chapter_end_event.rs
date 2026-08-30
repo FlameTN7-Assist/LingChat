@@ -125,6 +125,16 @@ impl ScriptEvent for ChapterEndEvent {
             self.end_type,
             next
         );
+
+        // 章节结束：还原剧本内切换的玩家身份（set_player_identity 的 chapter 作用域到期）
+        {
+            let mut gs = ctx.game_status.lock().await;
+            if let Some(original) = gs.player_identity_override.take() {
+                gs.player = original;
+                tracing::info!("[ChapterEndEvent] 玩家身份已还原为 '{}'", gs.player.user_name);
+            }
+        }
+
         Ok(Some(next))
     }
 
