@@ -271,8 +271,8 @@ impl GameRoleManager {
         let mut involved_ids: HashSet<i32> = HashSet::new();
         for line in source_lines {
             if let Some(sid) = line.sender_role_id() {
-                // 跳过 id 为 0 的角色（ 0 代表的是玩家，不参与记忆同步）
-                if sid != 0 {
+                // 跳过 id 为 0 的角色（PLAYER_ROLE_ID 代表玩家，不参与记忆同步）
+                if sid != crate::ai_service::types::PLAYER_ROLE_ID {
                     involved_ids.insert(sid);
                 }
             }

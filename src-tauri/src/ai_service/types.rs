@@ -606,6 +606,10 @@ impl std::hash::Hash for GameRole {
 // Player
 // ==========================================
 
+/// 玩家的虚拟角色 ID（不占 DB 真实角色行）。
+/// 所有玩家消息的 `sender_role_id` 都用此常量，替代魔法数字 0。
+pub const PLAYER_ROLE_ID: i32 = 0;
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Player {
     pub user_name: String,

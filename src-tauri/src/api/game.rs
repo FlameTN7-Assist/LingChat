@@ -427,7 +427,7 @@ pub fn compute_user_message_seqs(line_list: &[GameLine]) -> Vec<Option<u32>> {
     line_list
         .iter()
         .map(|gl| {
-            if gl.base.sender_role_id == Some(0) && matches!(gl.attribute(), LineAttribute::User) {
+            if gl.base.sender_role_id == Some(crate::ai_service::types::PLAYER_ROLE_ID) && matches!(gl.attribute(), LineAttribute::User) {
                 count += 1;
                 Some(count)
             } else {
@@ -637,7 +637,7 @@ pub(crate) async fn build_web_init_data(
 
 #[tauri::command]
 pub async fn add_role_to_scene(app: AppHandle, role_id: i32) -> Result<JsonValue, String> {
-    if role_id == 0 {
+    if role_id == crate::ai_service::types::PLAYER_ROLE_ID {
         return Err("无法添加玩家角色 (role_id=0)".to_string());
     }
 
@@ -744,7 +744,7 @@ pub async fn add_role_to_scene(app: AppHandle, role_id: i32) -> Result<JsonValue
 
 #[tauri::command]
 pub async fn remove_role_from_scene(app: AppHandle, role_id: i32) -> Result<JsonValue, String> {
-    if role_id == 0 {
+    if role_id == crate::ai_service::types::PLAYER_ROLE_ID {
         return Err("无法移除玩家角色 (role_id=0)".to_string());
     }
 

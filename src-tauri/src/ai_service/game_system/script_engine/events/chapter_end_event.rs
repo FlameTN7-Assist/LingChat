@@ -161,7 +161,10 @@ impl ChapterEndEvent {
         let conv_text = {
             let mut gs = ctx.game_status.lock().await;
             gs.refresh_memories(ctx.db).await?;
-            let rid = gs.current_role_id.or(gs.main_role_id).unwrap_or(0);
+            let rid = gs
+                .current_role_id
+                .or(gs.main_role_id)
+                .unwrap_or(crate::ai_service::types::PLAYER_ROLE_ID);
             if rid != 0 {
                 if let Ok(role) = gs.get_role(ctx.db, rid).await {
                     let memory = role.memory.clone();
