@@ -16,6 +16,7 @@ import type {
   ScriptCharacter,
 } from '@/api/services/script-editor'
 import { emptyAssets, useEditorState } from './state'
+import { useUserStore } from '../user/user'
 
 type StateRefs = ReturnType<typeof useEditorState>
 
@@ -84,6 +85,11 @@ export const useEditorGetters = (s: StateRefs) => {
       ?.user_name
     if (typeof scriptUserName === 'string' && scriptUserName.trim()) {
       return scriptUserName.trim()
+    }
+    // 解耦玩家与 AI：剧本未覆盖时，用全局玩家档案名（user store 已由初始化加载）
+    const userStore = useUserStore()
+    if (userStore.playerProfile?.user_name && userStore.playerProfile.user_name !== '玩家') {
+      return userStore.playerProfile.user_name
     }
     return i18n.global.t('scriptEditor.fieldRow.mainRole')
   })
