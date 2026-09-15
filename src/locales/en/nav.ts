@@ -1,6 +1,7 @@
 // English language pack, maintained from zh-CN/nav.ts
 export default {
   character: "Character",
+  identity: "Identity",
   adventure: "Bond",
   text: "General",
   background: "Background",

@@ -23,6 +23,13 @@ export default {
     // 劇本模式下提交自由輸入被後端拒絕時嘅提示
     choiceRequired: "請撳一個選項",
     inputNotAllowed: "而家輸入唔到",
+    // 附身切換（玩家側行為）
+    possessing: "現正扮演",
+    possessGroupIdentities: "我嘅身份",
+    possessGroupAiRoles: "AI 角色",
+    possessSuccessTitle: "附身切換成功",
+    possessSuccess: "現正扮演：{name}",
+    possessFailedTitle: "附身失敗",
   },
   avatar: {
     live2dUnavailable: "Live2D 暫時用唔到",

@@ -26,6 +26,16 @@
         <p class="hidden whitespace-nowrap xl:block">{{ $t("nav.character") }}</p>
       </Button>
       <Button
+        ref="identityBtn"
+        type="nav"
+        class="shrink-0"
+        @click="() => switchTab('identity', 'identityBtn')"
+        :class="{ active: uiStore.currentSettingsTab === 'identity' }"
+      >
+        <UserRound :size="18" />
+        <p class="hidden whitespace-nowrap xl:block">{{ $t("nav.identity") }}</p>
+      </Button>
+      <Button
         ref="adventureBtn"
         type="nav"
         class="shrink-0"
@@ -144,6 +154,7 @@
 
 <script setup lang="ts">
   import { ref, onMounted, watch } from "vue";
+  import { UserRound } from "lucide-vue-next";
   import { useUIStore } from "../../stores/modules/ui/ui";
   import { isMobile } from "../../utils/platform";
   import { Button } from "../base";
@@ -164,6 +175,7 @@
 
   // 使用更宽松的类型定义
   const characterBtn = ref<ButtonRef | null>(null);
+  const identityBtn = ref<ButtonRef | null>(null);
   const textBtn = ref<ButtonRef | null>(null);
   const backgroundBtn = ref<ButtonRef | null>(null);
   const petBtn = ref<ButtonRef | null>(null);
@@ -184,6 +196,7 @@
   const handleIndicatorMove = (currentRefName: string) => {
     const buttonRef = {
       characterBtn,
+      identityBtn,
       textBtn,
       backgroundBtn,
       petBtn,
@@ -258,6 +271,9 @@
     switch (activeTab) {
       case "character":
         activeButton = characterBtn.value;
+        break;
+      case "identity":
+        activeButton = identityBtn.value;
         break;
       case "text":
         activeButton = textBtn.value;

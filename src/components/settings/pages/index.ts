@@ -5,6 +5,7 @@ export { default as SettingsAdvance } from "./SettingsAdvance.vue";
 export { default as SettingsHistory } from "./SettingsHistory.vue";
 export { default as SettingsSchedule } from "./SettingsSchedule.vue";
 export { default as SettingsCharacter } from "./SettingsCharacter.vue";
+export { default as SettingsIdentity } from "./SettingsIdentity.vue";
 export { default as SettingsBackground } from "./SettingsBackground.vue";
 export { default as SettingsAchievement } from "./SettingsAchievement.vue";
 export { default as SettingsAdventure } from "./SettingsAdventure.vue";

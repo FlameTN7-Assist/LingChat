@@ -1,5 +1,6 @@
 export default {
   character: "キャラクター",
+  identity: "身分",
   adventure: "絆",
   text: "一般",
   background: "背景",

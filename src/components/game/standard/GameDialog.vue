@@ -169,21 +169,29 @@
         <!-- 分割线：青蓝色发光线条，亮段从左向右流动（同源桌宠外框 sweep-glow-ring） -->
         <div class="dialog-divider-glow my-1.5"></div>
 
-        <!-- 附身切换：简陋但可用，列出玩家身份与 AI 角色；美化留给后续迭代 -->
+        <!-- 附身切换：玩家身份 / AI 角色分组选择，实时展示当前扮演实体 -->
         <div class="flex items-center gap-2 text-sm text-white/80">
-          <span class="shrink-0">当前扮演：</span>
+          <UserRound :size="16" class="shrink-0 text-white/60" />
+          <span class="shrink-0">{{ $t("game.dialog.possessing") }}</span>
           <select
             class="max-w-60 min-w-0 flex-1 rounded border border-white/20 bg-[rgba(0,14,39,0.6)] px-1 py-0.5 text-sm text-white outline-none"
             :value="possessedRoleId"
+            :title="possessedLabel"
             @change="onPossessChange"
           >
-            <option
-              v-for="opt in possessionOptions"
-              :key="`${opt.kind}-${opt.roleId}`"
-              :value="opt.roleId"
+            <optgroup :label="$t('game.dialog.possessGroupIdentities')">
+              <option v-for="opt in identityOptions" :key="`identity-${opt.roleId}`" :value="opt.roleId">
+                {{ opt.label }}
+              </option>
+            </optgroup>
+            <optgroup
+              v-if="aiOptions.length > 0"
+              :label="$t('game.dialog.possessGroupAiRoles')"
             >
-              {{ opt.label }}
-            </option>
+              <option v-for="opt in aiOptions" :key="`ai-${opt.roleId}`" :value="opt.roleId">
+                {{ opt.label }}
+              </option>
+            </optgroup>
           </select>
         </div>
 
@@ -240,6 +248,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { UserRound } from "lucide-vue-next";
 import { useTypeWriter } from "../../../composables/ui/useTypeWriter";
 import { setMobileMenuOpen, useAsrInput } from "../../../composables/useAsrInput";
 import { useChatInput } from "../../../composables/chat/useChatInput";
@@ -289,8 +298,8 @@ watch(showMobileMenu, (open) => setMobileMenuOpen(open));
 // 当前游戏状态（模板 v-show 判定回复显示区 / 输入框）
 const currentStatus = computed(() => gameStore.currentStatus);
 
-// ===== 附身切换（最小可用接线）=====
-// 玩家身份来自统一实体接口；AI 角色取自现成的角色列表命令。
+// ===== 附身切换 =====
+// 玩家身份来自统一实体接口；AI 角色取自现成的角色列表命令。下拉按两组呈现。
 interface PossessionOption {
   roleId: number;
   label: string;
@@ -299,13 +308,21 @@ interface PossessionOption {
 const possessionOptions = ref<PossessionOption[]>([]);
 const possessedRoleId = ref<number>(0);
 
+// 分组下拉的数据源（optgroup 不接受混合列表）
+const identityOptions = computed(() => possessionOptions.value.filter((o) => o.kind === "identity"));
+const aiOptions = computed(() => possessionOptions.value.filter((o) => o.kind === "ai"));
+// 当前附身实体名，用于下拉 title 悬浮提示
+const possessedLabel = computed(
+  () => possessionOptions.value.find((o) => o.roleId === possessedRoleId.value)?.label ?? ""
+);
+
 /** 拉取可选实体：玩家身份（含默认身份）+ AI 角色，并同步当前附身项 */
 async function loadPossessionOptions() {
   try {
     const identities = await listIdentities();
     const options: PossessionOption[] = identities.map((item) => ({
       roleId: item.role_id,
-      label: `身份：${item.name}`,
+      label: item.name,
       kind: "identity" as const,
     }));
     const current = identities.find((item) => item.possessed);
@@ -316,7 +333,7 @@ async function loadPossessionOptions() {
       for (const item of page.items) {
         const roleId = Number(item.character_id);
         if (!Number.isFinite(roleId)) continue;
-        options.push({ roleId, label: `角色：${item.title || item.name}`, kind: "ai" });
+        options.push({ roleId, label: item.title || item.name, kind: "ai" });
       }
     } catch (error) {
       console.warn("[Possession] 加载 AI 角色列表失败:", error);
@@ -337,8 +354,8 @@ async function onPossessChange(event: Event) {
     gameStore.userName = name;
     uiStore.showNotification({
       type: "success",
-      title: "附身切换成功",
-      message: `当前扮演：${name}`,
+      title: t("game.dialog.possessSuccessTitle"),
+      message: t("game.dialog.possessSuccess", { name }),
       duration: 2000,
       skipTipsCheck: true,
     });
@@ -352,7 +369,7 @@ async function onPossessChange(event: Event) {
     }
     uiStore.showNotification({
       type: "warning",
-      title: "附身失败",
+      title: t("game.dialog.possessFailedTitle"),
       message: String(error),
       skipTipsCheck: true,
     });

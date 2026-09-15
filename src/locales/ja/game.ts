@@ -22,6 +22,13 @@ export default {
     // スクリプトが自由入力を拒否したときの通知
     choiceRequired: "選択肢をクリックしてください",
     inputNotAllowed: "現在は入力できません",
+    // 憑依の切り替え（プレイヤー側の操作）
+    possessing: "演じている",
+    possessGroupIdentities: "マイアイデンティティ",
+    possessGroupAiRoles: "AI キャラクター",
+    possessSuccessTitle: "憑依の切り替えに成功しました",
+    possessSuccess: "現在 {name} を演じています",
+    possessFailedTitle: "憑依に失敗しました",
   },
   avatar: {
     live2dUnavailable: "Live2D を利用できません",

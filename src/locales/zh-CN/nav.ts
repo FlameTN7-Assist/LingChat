@@ -1,5 +1,6 @@
 export default {
   character: "角色",
+  identity: "身份",
   adventure: "羁绊",
   text: "通用",
   background: "背景",

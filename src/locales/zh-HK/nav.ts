@@ -1,6 +1,7 @@
 // 繁體中文（香港 · 粵語文體）语言包，由 zh-CN/nav.ts（约 11 条） 翻譯維護
 export default {
   character: "角色",
+  identity: "身份",
   adventure: "羈絆",
   text: "通用",
   background: "背景",

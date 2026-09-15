@@ -36,6 +36,7 @@
     SettingsAdventure,
     SettingsBackground,
     SettingsCharacter,
+    SettingsIdentity,
     SettingsHistory,
     SettingsLog,
     SettingsPlugins,
@@ -80,6 +81,7 @@
   // 标签顺序与 SettingsNav 导航一致
   const TABS = [
     "character",
+    "identity",
     "adventure",
     "text",
     "background",
@@ -102,6 +104,7 @@
     history: SettingsHistory,
     achievement: SettingsAchievement,
     character: SettingsCharacter,
+    identity: SettingsIdentity,
     background: SettingsBackground,
     log: SettingsLog,
     plugins: SettingsPlugins,
