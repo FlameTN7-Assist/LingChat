@@ -642,6 +642,37 @@ pub struct Player {
 }
 
 // ==========================================
+// RoleProfile
+// ==========================================
+
+/// 实体人设扩展（role.profile_json 的 JSON 结构）。
+/// 玩家身份实体的核心数据载体；AI 角色此列为 NULL。
+/// 字段全量 serde(default)，未来加字段不改表。
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RoleProfile {
+    /// 副标题/称号
+    #[serde(default)]
+    pub subtitle: String,
+    /// 人设设定文本（该实体被 AI 控制时作为其 system 人设材料；被人类附身时作为他者认知材料）
+    #[serde(default)]
+    pub prompt: String,
+    /// 一句话简介
+    #[serde(default)]
+    pub info: String,
+    /// 说话风格示例
+    #[serde(default)]
+    pub speech_examples: String,
+    // ── 空间玩法预留，本期不写任何逻辑 ──
+    #[serde(default)]
+    pub location_id: Option<String>,
+    #[serde(default)]
+    pub home_location_id: Option<String>,
+    #[serde(default)]
+    pub attributes: std::collections::HashMap<String, serde_json::Value>,
+}
+
+// ==========================================
 // AdventureConfig
 // ==========================================
 

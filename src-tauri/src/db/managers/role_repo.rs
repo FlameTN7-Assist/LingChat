@@ -5,11 +5,11 @@ use anyhow::{Context, Result};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection,
-    EntityTrait, QueryFilter, QuerySelect, Set, Statement,
+    EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set, Statement,
 };
 use tracing::warn;
 
-use crate::ai_service::types::CharacterSettings;
+use crate::ai_service::types::{CharacterSettings, RoleProfile};
 use crate::db::entities::line;
 use crate::db::entities::line_perception;
 use crate::db::entities::role::{
@@ -264,13 +264,14 @@ impl RoleRepo {
     }
 
     /// 确保 role 表中存在 id=0 的 User 角色（代表人类玩家）。
-    /// 若已有 id=0 的行但名称/类型不匹配，则更新为正确值。
+    /// 已存在时只校正类型，绝不回写 name。
     /// 幂等操作，每次启动调用。
     pub async fn ensure_user_role(db: &DatabaseConnection) -> Result<()> {
         if let Some(existing) = role::Entity::find_by_id(0).one(db).await? {
-            if existing.name != "User" || existing.role_type != RoleType::User {
+            // 为什么只改类型：统一实体后 id=0 的 name 会被"玩家名搬家"改写为真实玩家名，
+            // 若在此处按旧逻辑强制回写 "User"，会抹掉搬家结果并让每次启动重复搬运（甚至丢名）。
+            if existing.role_type != RoleType::User {
                 let mut active: role::ActiveModel = existing.into();
-                active.name = Set("User".to_string());
                 active.role_type = Set(RoleType::User);
                 active.update(db).await?;
             }
@@ -332,5 +333,516 @@ impl RoleRepo {
         settings.character_folder = folder;
         settings.resource_path = Some(path.to_string_lossy().into_owned());
         Ok(Some(settings))
+    }
+
+    // ==============================================================
+    // 统一实体：实体人设（profile_json）与玩家身份（role_type=User）
+    // ==============================================================
+
+    // 本节方法属于 PR1 交付的数据层公面，运行时消费方（命令/附身链路）在后续 PR 接线，
+    // 现阶段仅单测调用；先豁免 dead_code，避免编译期噪音掩盖真实告警。
+
+    /// 从 `profile_json` 原文解析人设。
+    /// NULL/空白/坏 JSON 一律静默回退默认值——该列是可空增量列，旧库升级后全为 NULL，
+    /// "尚未设置"不是故障；一条脏数据也不该阻断聊天启动链路，故只告警不报错。
+    fn parse_profile_json(role_id: i32, raw: Option<&str>) -> RoleProfile {
+        let Some(raw) = raw.filter(|s| !s.trim().is_empty()) else {
+            return RoleProfile::default();
+        };
+        serde_json::from_str(raw).unwrap_or_else(|e| {
+            warn!("角色人设 JSON 损坏，回退默认值: role_id={}, err={}", role_id, e);
+            RoleProfile::default()
+        })
+    }
+
+    /// 读取实体人设（`role.profile_json`），缺失/损坏时返回默认人设。
+    #[allow(dead_code)]
+    pub async fn get_role_profile(db: &DatabaseConnection, role_id: i32) -> Result<RoleProfile> {
+        let Some(role) = Self::get_role_by_id(db, role_id).await? else {
+            return Ok(RoleProfile::default());
+        };
+        Ok(Self::parse_profile_json(role_id, role.profile_json.as_deref()))
+    }
+
+    /// 写入实体人设（整体覆盖 `profile_json`）。
+    /// 为什么是覆盖而非字段级合并：调用方始终持有完整 RoleProfile，
+    /// 合并语义无法表达"把某字段清空"，反而会留下无法删除的旧值。
+    #[allow(dead_code)]
+    pub async fn set_role_profile(
+        db: &DatabaseConnection,
+        role_id: i32,
+        profile: &RoleProfile,
+    ) -> Result<()> {
+        let json = serde_json::to_string(profile).context("序列化角色人设失败")?;
+        role::Entity::update_many()
+            .col_expr(role::Column::ProfileJson, Expr::value(Some(json)))
+            .filter(role::Column::Id.eq(role_id))
+            .exec(db)
+            .await?;
+        Ok(())
+    }
+
+    /// 列出全部玩家身份（role_type=User，按 id 升序），并附带解析好的人设。
+    /// 排序固定升序：id=0 是默认身份，前端与运行时都需要稳定顺序。
+    #[allow(dead_code)]
+    pub async fn list_player_identities(
+        db: &DatabaseConnection,
+    ) -> Result<Vec<(RoleModel, RoleProfile)>> {
+        let roles = role::Entity::find()
+            .filter(role::Column::RoleType.eq(RoleType::User))
+            .order_by_asc(role::Column::Id)
+            .all(db)
+            .await?;
+        Ok(roles
+            .into_iter()
+            .map(|role| {
+                let profile = Self::parse_profile_json(role.id, role.profile_json.as_deref());
+                (role, profile)
+            })
+            .collect())
+    }
+
+    /// 新建玩家身份（role_type=User），返回新行 id。
+    /// script/resource 键显式置 NULL：玩家身份不绑定剧本，也不能带人物资源目录，
+    /// 否则会被 `role_sync` 当作可同步的剧本角色处理。
+    #[allow(dead_code)]
+    pub async fn create_player_identity(
+        db: &DatabaseConnection,
+        name: &str,
+        profile: &RoleProfile,
+    ) -> Result<i32> {
+        let json = serde_json::to_string(profile).context("序列化角色人设失败")?;
+        let active = RoleActiveModel {
+            name: Set(name.to_string()),
+            role_type: Set(RoleType::User),
+            script_key: Set(Option::<String>::None),
+            script_role_key: Set(Option::<String>::None),
+            resource_folder: Set(Option::<String>::None),
+            profile_json: Set(Some(json)),
+            ..Default::default()
+        };
+        let inserted = active.insert(db).await?;
+        tracing::info!("创建玩家身份: id={}, name={}", inserted.id, name);
+        Ok(inserted.id)
+    }
+
+    /// 更新玩家身份的名字与人设。
+    /// 拒绝系统保护 id（0/1/2）：这些行承载历史台词归属与启动兜底，改名会波及全局。
+    /// 仅接受 role_type=User，避免误把 AI 角色行当玩家身份改写。
+    #[allow(dead_code)]
+    pub async fn update_player_identity(
+        db: &DatabaseConnection,
+        role_id: i32,
+        name: &str,
+        profile: &RoleProfile,
+    ) -> Result<()> {
+        if Self::is_system_protected_role(role_id) {
+            anyhow::bail!("系统保护角色不允许作为玩家身份修改: id={}", role_id);
+        }
+        let Some(role) = Self::get_role_by_id(db, role_id).await? else {
+            anyhow::bail!("玩家身份不存在: id={}", role_id);
+        };
+        if role.role_type != RoleType::User {
+            anyhow::bail!("目标角色不是玩家身份: id={}", role_id);
+        }
+        let json = serde_json::to_string(profile).context("序列化角色人设失败")?;
+        let mut active: RoleActiveModel = role.into();
+        active.name = Set(name.to_string());
+        active.profile_json = Set(Some(json));
+        active.update(db).await?;
+        Ok(())
+    }
+
+    /// 删除玩家身份，返回是否实际删除了行。
+    /// 系统保护 id 或非 User 行一律"拒绝并返回 false"而非报错：
+    /// 调用方（前端列表）对不可删项做静默处理即可，无需把它当异常流程分支。
+    #[allow(dead_code)]
+    pub async fn delete_player_identity(db: &DatabaseConnection, role_id: i32) -> Result<bool> {
+        if Self::is_system_protected_role(role_id) {
+            warn!("拒绝删除系统保护的玩家身份: id={}", role_id);
+            return Ok(false);
+        }
+        let Some(role) = Self::get_role_by_id(db, role_id).await? else {
+            return Ok(false);
+        };
+        if role.role_type != RoleType::User {
+            warn!("拒绝删除非玩家身份的角色: id={}", role_id);
+            return Ok(false);
+        }
+
+        // 为什么必须手工清理引用：玩家身份行会成为 line.sender_role_id（附身后玩家以该实体 id 发言），
+        // 也会被 line_perception / memory_bank 引用；SQLite 开着外键约束，直接删 role 行必然失败。
+        // 无需像 delete_main_role 那样关闭 FK——玩家身份不参与 save.main_role_id 与存档级联，不存在循环引用。
+
+        // 1. 台词归属回落到默认身份 id=0，而非置 NULL：保留"这条是玩家说的"语义。
+        //    与 delete_main_role 的置 NULL 不同——那是 AI 角色删除后台词确实失去归属。
+        line::Entity::update_many()
+            .col_expr(line::Column::SenderRoleId, Expr::value(Some(0i32)))
+            .filter(line::Column::SenderRoleId.eq(role_id))
+            .exec(db)
+            .await?;
+
+        // 2. 感知记录：NOT NULL 外键，不删会变孤儿行并阻塞角色删除
+        line_perception::Entity::delete_many()
+            .filter(line_perception::Column::RoleId.eq(role_id))
+            .exec(db)
+            .await?;
+
+        // 3. 记忆行：玩家实体参与记忆后，会按 role_id 落 memory_bank
+        MemoryRepo::delete_all_memories_by_role_id(db, role_id).await?;
+
+        // save.main_role_id 固定指向 AI 主角色（存档以 AI 主角为轴），不会指向 User 行，故无需处理。
+
+        let result = role::Entity::delete_by_id(role_id).exec(db).await?;
+        Ok(result.rows_affected > 0)
+    }
+
+    /// 判定玩家名是否为"尚未搬家"的占位值。
+    fn is_placeholder_player_name(name: &str) -> bool {
+        let name = name.trim();
+        name.is_empty() || name == "User" || name == "user_name未设定"
+    }
+
+    /// 首次启动把散落在主角色 settings.yml 的玩家名搬到 id=0 玩家实体（幂等，只读不改写文件）。
+    ///
+    /// 为什么需要搬家：统一实体后玩家名的唯一真相源是 role 行，而旧版本把它写在每个 AI 的
+    /// settings.yml 里；本期只做单向读取，settings.yml 的旧字段保留只读（后续版本再废弃）。
+    /// 为什么以 name 是否占位来判断"搬过"：这是唯一能区分"从未搬过"与"用户就叫 User"的廉价信号，
+    /// 且读不到/占位时保持原样，下次启动再试，天然幂等、不阻断启动。
+    pub async fn ensure_default_player_identity(
+        db: &DatabaseConnection,
+        data_dir: &Path,
+    ) -> Result<()> {
+        // 复用既有路径确保 id=0 存在（该函数已不再回写 name，不会覆盖搬家结果）
+        Self::ensure_user_role(db).await?;
+        let Some(user) = Self::get_role_by_id(db, 0).await? else {
+            // ensure_user_role 已保证存在，这里兜底避免 unwrap 崩掉启动
+            return Ok(());
+        };
+        if !Self::is_placeholder_player_name(&user.name) {
+            return Ok(());
+        }
+
+        // dev 基线把 user_name/user_subtitle 写在主角色（id=1）的 settings.yml
+        let Some(settings) = Self::get_role_settings_by_id(db, data_dir, 1).await? else {
+            tracing::info!("默认玩家身份未搬家：主角色 (id=1) 暂无可用 settings.yml");
+            return Ok(());
+        };
+        let migrated_name = settings.user_name.trim();
+        if Self::is_placeholder_player_name(migrated_name) {
+            tracing::info!(
+                "默认玩家身份未搬家：主角色 user_name 仍是占位值 {:?}",
+                settings.user_name
+            );
+            return Ok(());
+        }
+
+        // 只覆盖 subtitle：profile_json 里其它字段可能已由用户设置过，不能整份丢弃
+        let mut profile = Self::parse_profile_json(0, user.profile_json.as_deref());
+        if let Some(subtitle) = settings.user_subtitle.as_deref() {
+            profile.subtitle = subtitle.to_string();
+        }
+        let json = serde_json::to_string(&profile).context("序列化角色人设失败")?;
+        let mut active: RoleActiveModel = user.into();
+        active.name = Set(migrated_name.to_string());
+        active.profile_json = Set(Some(json));
+        active.update(db).await?;
+        tracing::info!("默认玩家身份已从主角色设置搬家: name={}", migrated_name);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::entities::memory_bank;
+    use crate::migration::Migrator;
+    use sea_orm::Database;
+    use sea_orm_migration::MigratorTrait;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// 每个测试一份独立的内存 SQLite，并跑完整迁移，保证 role 表结构与生产一致（含 profile_json）。
+    /// 用 `cache=shared` 而非裸 `sqlite::memory:`：连接池内多连接必须看到同一份库，
+    /// 否则迁移建的表和后续查询会落在不同库上。
+    async fn test_db() -> DatabaseConnection {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        let url = format!("sqlite:file:role_repo_test_{seq}?mode=memory&cache=shared");
+        let db = Database::connect(&url).await.expect("连接内存 SQLite 失败");
+        Migrator::up(&db, None).await.expect("内存库迁移失败");
+        db
+    }
+
+    /// 插入一行角色，用于构造主角色/玩家身份等前置数据。
+    async fn insert_role(
+        db: &DatabaseConnection,
+        id: i32,
+        name: &str,
+        role_type: RoleType,
+        resource_folder: Option<&str>,
+    ) -> RoleModel {
+        RoleActiveModel {
+            id: Set(id),
+            name: Set(name.to_string()),
+            role_type: Set(role_type),
+            resource_folder: Set(resource_folder.map(|s| s.to_string())),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .expect("插入角色失败")
+    }
+
+    /// 插入一行存档：line / memory_bank 的 save_id 是非空外键，测试台词与记忆前必须先有 save 行。
+    async fn insert_save(db: &DatabaseConnection, id: i32, main_role_id: Option<i32>) {
+        let now = chrono::Utc::now().naive_utc();
+        save::ActiveModel {
+            id: Set(id),
+            title: Set("测试存档".into()),
+            status: Set("{}".into()),
+            create_date: Set(now),
+            update_date: Set(now),
+            main_role_id: Set(main_role_id),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .expect("插入存档失败");
+    }
+
+    /// 写一份主角色 settings.yml（搬家只读它，不写它）。
+    fn write_main_settings(data_dir: &Path, user_name: &str, user_subtitle: &str) {
+        let folder = data_dir.join("game_data").join("characters").join("hero");
+        std::fs::create_dir_all(&folder).expect("创建角色目录失败");
+        let yaml =
+            format!("ai_name: Hero\nuser_name: {user_name}\nuser_subtitle: {user_subtitle}\n");
+        std::fs::write(folder.join("settings.yml"), yaml).expect("写 settings.yml 失败");
+    }
+
+    #[tokio::test]
+    async fn role_profile_missing_or_broken_json_falls_back_to_default() {
+        let db = test_db().await;
+        insert_role(&db, 1, "Hero", RoleType::Main, Some("hero")).await;
+
+        // NULL：旧库升级后的初始状态
+        assert_eq!(
+            RoleRepo::get_role_profile(&db, 1).await.unwrap(),
+            RoleProfile::default()
+        );
+        // 角色不存在同样兜底，不报错
+        assert_eq!(
+            RoleRepo::get_role_profile(&db, 999).await.unwrap(),
+            RoleProfile::default()
+        );
+
+        // 坏 JSON
+        role::Entity::update_many()
+            .col_expr(
+                role::Column::ProfileJson,
+                Expr::value(Some("{ 这不是 JSON".to_string())),
+            )
+            .filter(role::Column::Id.eq(1))
+            .exec(&db)
+            .await
+            .unwrap();
+        assert_eq!(
+            RoleRepo::get_role_profile(&db, 1).await.unwrap(),
+            RoleProfile::default()
+        );
+
+        // 空白字符串
+        role::Entity::update_many()
+            .col_expr(
+                role::Column::ProfileJson,
+                Expr::value(Some("   ".to_string())),
+            )
+            .filter(role::Column::Id.eq(1))
+            .exec(&db)
+            .await
+            .unwrap();
+        assert_eq!(
+            RoleRepo::get_role_profile(&db, 1).await.unwrap(),
+            RoleProfile::default()
+        );
+
+        // 合法 JSON：缺失字段靠 serde(default) 补齐
+        role::Entity::update_many()
+            .col_expr(
+                role::Column::ProfileJson,
+                Expr::value(Some(r#"{"subtitle":"称号"}"#.to_string())),
+            )
+            .filter(role::Column::Id.eq(1))
+            .exec(&db)
+            .await
+            .unwrap();
+        let parsed = RoleRepo::get_role_profile(&db, 1).await.unwrap();
+        assert_eq!(parsed.subtitle, "称号");
+        assert_eq!(parsed.prompt, "");
+        assert!(parsed.location_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn player_identity_crud_roundtrip() {
+        let db = test_db().await;
+        let profile = RoleProfile {
+            subtitle: "小名".into(),
+            prompt: "温柔的人".into(),
+            ..Default::default()
+        };
+
+        let id = RoleRepo::create_player_identity(&db, "小明", &profile).await.unwrap();
+        assert!(id > 0);
+
+        let listed = RoleRepo::list_player_identities(&db).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].0.id, id);
+        assert_eq!(listed[0].0.role_type, RoleType::User);
+        assert!(listed[0].0.script_key.is_none());
+        assert!(listed[0].0.resource_folder.is_none());
+        assert_eq!(listed[0].1, profile);
+
+        let mut updated = profile.clone();
+        updated.subtitle = "新称号".into();
+        RoleRepo::update_player_identity(&db, id, "小红", &updated).await.unwrap();
+        let role = RoleRepo::get_role_by_id(&db, id).await.unwrap().unwrap();
+        assert_eq!(role.name, "小红");
+        assert_eq!(RoleRepo::get_role_profile(&db, id).await.unwrap(), updated);
+
+        // set_role_profile 独立覆盖
+        let direct = RoleProfile {
+            info: "一句话简介".into(),
+            ..Default::default()
+        };
+        RoleRepo::set_role_profile(&db, id, &direct).await.unwrap();
+        assert_eq!(RoleRepo::get_role_profile(&db, id).await.unwrap(), direct);
+
+        assert!(RoleRepo::delete_player_identity(&db, id).await.unwrap());
+        assert!(RoleRepo::get_role_by_id(&db, id).await.unwrap().is_none());
+        // 重复删除返回 false 而非报错
+        assert!(!RoleRepo::delete_player_identity(&db, id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn protected_and_non_user_identities_are_rejected() {
+        let db = test_db().await;
+        RoleRepo::ensure_user_role(&db).await.unwrap();
+        insert_role(&db, 1, "Hero", RoleType::Main, Some("hero")).await;
+
+        // id=0 受保护：改不动、删不掉
+        assert!(
+            RoleRepo::update_player_identity(&db, 0, "x", &RoleProfile::default())
+                .await
+                .is_err()
+        );
+        assert!(!RoleRepo::delete_player_identity(&db, 0).await.unwrap());
+        let user = RoleRepo::get_role_by_id(&db, 0).await.unwrap().unwrap();
+        assert_eq!(user.name, "User");
+        assert_eq!(user.role_type, RoleType::User);
+
+        // AI 角色行不是玩家身份：update 报错、delete 拒绝
+        assert!(
+            RoleRepo::update_player_identity(&db, 1, "x", &RoleProfile::default())
+                .await
+                .is_err()
+        );
+        assert!(!RoleRepo::delete_player_identity(&db, 1).await.unwrap());
+        assert!(RoleRepo::get_role_by_id(&db, 1).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn deleting_player_identity_cleans_up_related_rows() {
+        let db = test_db().await;
+        RoleRepo::ensure_user_role(&db).await.unwrap();
+        insert_role(&db, 1, "Hero", RoleType::Main, Some("hero")).await;
+        insert_save(&db, 20, Some(1)).await;
+
+        let id = RoleRepo::create_player_identity(&db, "小明", &RoleProfile::default())
+            .await
+            .unwrap();
+
+        // 构造被引用的三类行：台词（sender=身份 id）、感知、记忆
+        let line_row = line::ActiveModel {
+            content: Set("你好".into()),
+            attribute: Set(line::LineAttribute::User),
+            sender_role_id: Set(Some(id)),
+            save_id: Set(20),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        line_perception::ActiveModel {
+            line_id: Set(line_row.id),
+            role_id: Set(id),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        memory_bank::ActiveModel {
+            info: Set("一条记忆".into()),
+            save_id: Set(20),
+            role_id: Set(Some(id)),
+            ..Default::default()
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+
+        assert!(RoleRepo::delete_player_identity(&db, id).await.unwrap());
+        assert!(RoleRepo::get_role_by_id(&db, id).await.unwrap().is_none());
+
+        // 台词保留，归属回落默认身份 0（而非失去归属）
+        let kept = line::Entity::find_by_id(line_row.id)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(kept.sender_role_id, Some(0));
+        // 感知与记忆行连根清除，不留外键孤儿
+        assert!(line_perception::Entity::find().all(&db).await.unwrap().is_empty());
+        assert!(memory_bank::Entity::find().all(&db).await.unwrap().is_empty());
+
+        // 默认身份 id=0 依旧不可删
+        assert!(!RoleRepo::delete_player_identity(&db, 0).await.unwrap());
+        assert!(RoleRepo::get_role_by_id(&db, 0).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn default_player_identity_migration_moves_name_and_is_idempotent() {
+        let db = test_db().await;
+        insert_role(&db, 1, "Hero", RoleType::Main, Some("hero")).await;
+        let tmp = tempfile::tempdir().unwrap();
+        write_main_settings(tmp.path(), "小明", "小名的称号");
+
+        RoleRepo::ensure_default_player_identity(&db, tmp.path()).await.unwrap();
+        let user = RoleRepo::get_role_by_id(&db, 0).await.unwrap().unwrap();
+        assert_eq!(user.name, "小明");
+        assert_eq!(
+            RoleRepo::get_role_profile(&db, 0).await.unwrap().subtitle,
+            "小名的称号"
+        );
+
+        // 第二次调用：即使 settings.yml 变了也不该再改写（id=0 已非占位值）
+        write_main_settings(tmp.path(), "应被忽略", "应被忽略");
+        RoleRepo::ensure_default_player_identity(&db, tmp.path()).await.unwrap();
+        let user = RoleRepo::get_role_by_id(&db, 0).await.unwrap().unwrap();
+        assert_eq!(user.name, "小明");
+        assert_eq!(
+            RoleRepo::get_role_profile(&db, 0).await.unwrap().subtitle,
+            "小名的称号"
+        );
+    }
+
+    #[tokio::test]
+    async fn default_player_identity_skips_placeholder_name() {
+        let db = test_db().await;
+        insert_role(&db, 1, "Hero", RoleType::Main, Some("hero")).await;
+        let tmp = tempfile::tempdir().unwrap();
+        write_main_settings(tmp.path(), "user_name未设定", "");
+
+        RoleRepo::ensure_default_player_identity(&db, tmp.path()).await.unwrap();
+        let user = RoleRepo::get_role_by_id(&db, 0).await.unwrap().unwrap();
+        assert_eq!(user.name, "User");
+        assert!(user.profile_json.is_none());
     }
 }
