@@ -601,6 +601,8 @@ export default {
     noSubtitle: "未设置副标题",
     defaultBadge: "默认身份",
     possessedBadge: "当前扮演",
+    possess: "扮演",
+    possessDisabledInScript: "剧本/试玩进行中无法切换扮演",
     defaultDeleteBlocked: "默认身份不可删除",
     fields: {
       name: "名字",

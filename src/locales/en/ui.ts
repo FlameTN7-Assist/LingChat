@@ -45,6 +45,10 @@ export default {
     infoLabel: "Intro: ",
     outfits: "Available Outfits",
     noOutfits: "No outfits available yet",
+    possess: "Possess",
+    possessing: "Possessing",
+    possessDisabledScript: "Cannot possess while a script or preview is running",
+    possessDisabledCurrent: "Cannot possess the character you are talking to",
     confirmSwitch:
       "Switching characters will clear the current character's memory — don't forget to save first if you need it!",
   },

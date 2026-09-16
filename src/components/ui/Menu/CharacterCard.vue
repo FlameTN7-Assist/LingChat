@@ -52,6 +52,14 @@
           <div class="text-brand mb-3 text-sm font-medium tracking-widest uppercase opacity-80">
             {{ subName }}
           </div>
+          <!-- 扮演中徽标：附身态显示，名字口径为 ai_name（name） -->
+          <span
+            v-if="isPossessed()"
+            class="mb-3 shrink-0 rounded-full border border-emerald-400/40 bg-emerald-300/10
+              px-2 py-0.5 text-[10px] text-emerald-200"
+          >
+            {{ $t("ui.characterCard.possessing") }}
+          </span>
         </div>
         <p class="line-clamp-3 text-base leading-relaxed text-gray-200/90 opacity-80">
           {{ info || $t("ui.characterCard.noInfo") }}
@@ -59,6 +67,27 @@
       </div>
 
       <div class="mt-4 flex items-center justify-end gap-2">
+        <!-- 附身入口：仅设置「角色」Tab 传入 showPossess 时呈现 -->
+        <button
+          v-if="showPossess"
+          @click="possess"
+          :disabled="possessDisabled"
+          :title="
+            possessDisabledReason ||
+            (isPossessed() ? $t('ui.characterCard.possessing') : $t('ui.characterCard.possess'))
+          "
+          :class="[
+            'flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-xs font-semibold transition-all',
+            possessDisabled
+              ? 'cursor-not-allowed border-white/10 bg-white/5 text-white/30'
+              : `border-amber-400 bg-amber-500/80 text-white shadow-lg shadow-amber-500/20
+                hover:bg-amber-500`,
+          ]"
+        >
+          <Loader2 v-if="possessing" :size="12" class="animate-spin" />
+          <Play v-else :size="12" />
+          {{ isPossessed() ? $t("ui.characterCard.possessing") : $t("ui.characterCard.possess") }}
+        </button>
         <button
           @click="showDetailModal"
           class="rounded-full border border-white/10 bg-white/10 px-4 py-1.5 text-xs font-semibold
@@ -224,7 +253,7 @@
 </template>
 
 <script setup lang="ts">
-  import { ref } from "vue";
+  import { computed, ref } from "vue";
   import { useI18n } from "vue-i18n";
   import { invoke } from "@tauri-apps/api/core";
   import { Icon } from "../../base";
@@ -238,8 +267,10 @@
   import { useGameStore } from "@/stores/modules/game";
   import { applyWebInitData } from "@/stores/modules/game/actions";
   import { useDialogStore } from "@/stores/modules/ui/dialog";
+  import { useUIStore } from "@/stores/modules/ui/ui";
+  import { possessEntity } from "@/api/services/identity";
   import { Settings } from "lucide-vue-next";
-  import { Cat, Check } from "lucide-vue-next";
+  import { Cat, Check, Loader2, Play } from "lucide-vue-next";
   import type { Clothes } from "@/types";
 
   interface CharacterProps {
@@ -253,6 +284,10 @@
     resourceFolder?: string;
     /** 来源："game" 或提供该角色的插件 id。 */
     source?: string | null;
+    /** 是否展示附身入口（仅设置「角色」Tab 传入 true） */
+    showPossess?: boolean;
+    /** 非空字符串表示禁用附身并作为悬浮提示（剧本进行中 / 不可接管的当前对话对象） */
+    possessDisabledReason?: string;
   }
 
   const props = withDefaults(defineProps<CharacterProps>(), {
@@ -261,6 +296,8 @@
     info: "",
     clothes: () => [],
     resourceFolder: "",
+    showPossess: false,
+    possessDisabledReason: "",
   });
 
   const emit = defineEmits(["saved"]);
@@ -268,15 +305,53 @@
   // 状态管理
   const isDetailVisible = ref(false);
   const isSettingsModalVisible = ref(false);
+  /** 附身请求进行中（按钮 loading，避免重复点击） */
+  const possessing = ref(false);
 
   const { t } = useI18n();
   const gameStore = useGameStore();
   const dialogStore = useDialogStore();
+  const uiStore = useUIStore();
 
   // 逻辑函数
   const isSelected = () => gameStore.mainRoleId === props.id;
   const isClothesSelected = (role_id: number, clothes_name: string) =>
     gameStore.getGameRole(role_id)?.clothesName === clothes_name;
+
+  /** 当前被附身角色以 store 为准（identity:possessed 广播即时同步） */
+  const isPossessed = () => gameStore.possessedRoleId === props.id;
+
+  const possessDisabled = computed(
+    () => !!props.possessDisabledReason || isPossessed() || possessing.value
+  );
+
+  /** 附身该 AI 角色；成功/失败走既有全局通知 */
+  const possess = async () => {
+    if (possessDisabled.value) return;
+    possessing.value = true;
+    try {
+      const name = await possessEntity(props.id);
+      // 立即回写本地态，不必等 identity:possessed 广播到达
+      gameStore.possessedRoleId = props.id;
+      gameStore.userName = name;
+      uiStore.showNotification({
+        type: "success",
+        title: t("game.dialog.possessSuccessTitle"),
+        message: t("game.dialog.possessSuccess", { name }),
+        duration: 2000,
+        skipTipsCheck: true,
+      });
+    } catch (error) {
+      uiStore.showNotification({
+        type: "warning",
+        title: t("game.dialog.possessFailedTitle"),
+        message: String(error),
+        skipTipsCheck: true,
+      });
+    } finally {
+      possessing.value = false;
+    }
+  };
 
   const showDetailModal = () => (isDetailVisible.value = true);
   const closeDetailModal = () => (isDetailVisible.value = false);

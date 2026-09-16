@@ -23,13 +23,10 @@ export default {
     // Shown when the script engine rejects free-form input
     choiceRequired: "Please pick an option",
     inputNotAllowed: "Input isn't allowed right now",
-    // Possession switcher (player-side action)
-    possessing: "Playing as",
-    possessGroupIdentities: "My Identities",
-    possessGroupAiRoles: "AI Characters",
-    possessSuccessTitle: "Switched successfully",
+    // Possession success/failure notifications (player-side action)
+    possessSuccessTitle: "Possession successful",
     possessSuccess: "Now playing as {name}",
-    possessFailedTitle: "Failed to switch",
+    possessFailedTitle: "Possession failed",
   },
   avatar: {
     live2dUnavailable: "Live2D unavailable",

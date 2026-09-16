@@ -44,6 +44,10 @@ export default {
     infoLabel: "介绍：",
     outfits: "可选服装",
     noOutfits: "暂无可用服装",
+    possess: "附身",
+    possessing: "扮演中",
+    possessDisabledScript: "剧本/试玩进行中无法附身",
+    possessDisabledCurrent: "不能附身正在对话的角色",
     confirmSwitch: "切换角色会导致当前角色记忆清空，有需要的话不要忘记存档哦",
   },
   archiveProgress: {

@@ -45,6 +45,10 @@ export default {
     infoLabel: "介紹：",
     outfits: "可揀嘅服裝",
     noOutfits: "暫時冇可用嘅服裝",
+    possess: "附身",
+    possessing: "扮演緊",
+    possessDisabledScript: "劇本／試玩進行中唔可以附身",
+    possessDisabledCurrent: "唔可以附身緊對話嘅角色",
     confirmSwitch: "轉角色會令而家呢個角色嘅記憶清空，有需要嘅話記住存檔喎",
   },
   archiveProgress: {

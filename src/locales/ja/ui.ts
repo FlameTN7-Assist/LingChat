@@ -44,6 +44,10 @@ export default {
     infoLabel: "紹介：",
     outfits: "選択可能な衣装",
     noOutfits: "利用可能な衣装はありません",
+    possess: "憑依",
+    possessing: "憑依中",
+    possessDisabledScript: "シナリオ／試遊の進行中は憑依できません",
+    possessDisabledCurrent: "会話中のキャラクターには憑依できません",
     confirmSwitch:
       "キャラクターを切り替えると、現在のキャラクターの記憶はクリアされます。必要な場合は忘れずにセーブしてくださいね",
   },

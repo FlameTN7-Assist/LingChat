@@ -593,6 +593,8 @@ export default {
     noSubtitle: "No subtitle set",
     defaultBadge: "Default",
     possessedBadge: "Currently Playing",
+    possess: "Play as",
+    possessDisabledInScript: "Cannot switch possession while a script or preview is running",
     defaultDeleteBlocked: "The default identity cannot be deleted",
     fields: {
       name: "Name",

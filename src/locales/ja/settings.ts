@@ -575,6 +575,8 @@ export default {
     noSubtitle: "サブタイトル未設定",
     defaultBadge: "デフォルト",
     possessedBadge: "現在演じている",
+    possess: "演じる",
+    possessDisabledInScript: "シナリオ／試遊の進行中は憑依を切り替えられません",
     defaultDeleteBlocked: "デフォルトのアイデンティティは削除できません",
     fields: {
       name: "名前",

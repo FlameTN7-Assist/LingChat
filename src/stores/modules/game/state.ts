@@ -70,6 +70,10 @@ export interface GameState {
 
   userName: string;
   userSubtitle: string;
+  /** 当前被附身实体 id（会话态，不落本地存储；0 = 默认身份） */
+  possessedRoleId: number;
+  /** 角色/身份列表版本号：后端 role:list-updated 广播时自增，驱动各列表重拉 */
+  roleListVersion: number;
 
   currentLine: string;
   currentStatus: "input" | "thinking" | "responding" | "presenting";
@@ -97,6 +101,8 @@ export const state: GameState = {
 
   userName: "",
   userSubtitle: "",
+  possessedRoleId: 0,
+  roleListVersion: 0,
 
   currentLine: "",
   currentStatus: "input",

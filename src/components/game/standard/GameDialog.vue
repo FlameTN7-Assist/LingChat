@@ -169,32 +169,6 @@
         <!-- 分割线：青蓝色发光线条，亮段从左向右流动（同源桌宠外框 sweep-glow-ring） -->
         <div class="dialog-divider-glow my-1.5"></div>
 
-        <!-- 附身切换：玩家身份 / AI 角色分组选择，实时展示当前扮演实体 -->
-        <div class="flex items-center gap-2 text-sm text-white/80">
-          <UserRound :size="16" class="shrink-0 text-white/60" />
-          <span class="shrink-0">{{ $t("game.dialog.possessing") }}</span>
-          <select
-            class="max-w-60 min-w-0 flex-1 rounded border border-white/20 bg-[rgba(0,14,39,0.6)] px-1 py-0.5 text-sm text-white outline-none"
-            :value="possessedRoleId"
-            :title="possessedLabel"
-            @change="onPossessChange"
-          >
-            <optgroup :label="$t('game.dialog.possessGroupIdentities')">
-              <option v-for="opt in identityOptions" :key="`identity-${opt.roleId}`" :value="opt.roleId">
-                {{ opt.label }}
-              </option>
-            </optgroup>
-            <optgroup
-              v-if="aiOptions.length > 0"
-              :label="$t('game.dialog.possessGroupAiRoles')"
-            >
-              <option v-for="opt in aiOptions" :key="`ai-${opt.roleId}`" :value="opt.roleId">
-                {{ opt.label }}
-              </option>
-            </optgroup>
-          </select>
-        </div>
-
         <!-- 输入区 -->
         <div
           class="my-1.25 flex min-h-10 w-full resize-none flex-col border-none bg-transparent text-xl font-bold whitespace-pre-line text-white transition-all duration-300 outline-none"
@@ -248,7 +222,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { UserRound } from "lucide-vue-next";
 import { useTypeWriter } from "../../../composables/ui/useTypeWriter";
 import { setMobileMenuOpen, useAsrInput } from "../../../composables/useAsrInput";
 import { useChatInput } from "../../../composables/chat/useChatInput";
@@ -268,8 +241,6 @@ import { createCharRevealWriter } from "../../../utils/typewriter/charReveal";
 import { TypeWriter } from "../../../utils/typewriter/TypeWriter";
 import { Button } from "../../base";
 import ScreenshotButton from "./ScreenshotButton.vue";
-import { characterGetAll } from "../../../api/services/character";
-import { listIdentities, possessEntity } from "../../../api/services/identity";
 
 const { t } = useI18n();
 const isShowingMotionText = ref(false);
@@ -298,83 +269,15 @@ watch(showMobileMenu, (open) => setMobileMenuOpen(open));
 // 当前游戏状态（模板 v-show 判定回复显示区 / 输入框）
 const currentStatus = computed(() => gameStore.currentStatus);
 
-// ===== 附身切换 =====
-// 玩家身份来自统一实体接口；AI 角色取自现成的角色列表命令。下拉按两组呈现。
-interface PossessionOption {
-  roleId: number;
-  label: string;
-  kind: "identity" | "ai";
-}
-const possessionOptions = ref<PossessionOption[]>([]);
-const possessedRoleId = ref<number>(0);
-
-// 分组下拉的数据源（optgroup 不接受混合列表）
-const identityOptions = computed(() => possessionOptions.value.filter((o) => o.kind === "identity"));
-const aiOptions = computed(() => possessionOptions.value.filter((o) => o.kind === "ai"));
-// 当前附身实体名，用于下拉 title 悬浮提示
-const possessedLabel = computed(
-  () => possessionOptions.value.find((o) => o.roleId === possessedRoleId.value)?.label ?? ""
-);
-
-/** 拉取可选实体：玩家身份（含默认身份）+ AI 角色，并同步当前附身项 */
-async function loadPossessionOptions() {
-  try {
-    const identities = await listIdentities();
-    const options: PossessionOption[] = identities.map((item) => ({
-      roleId: item.role_id,
-      label: item.name,
-      kind: "identity" as const,
-    }));
-    const current = identities.find((item) => item.possessed);
-    if (current) possessedRoleId.value = current.role_id;
-
-    try {
-      const page = await characterGetAll(1, 100);
-      for (const item of page.items) {
-        const roleId = Number(item.character_id);
-        if (!Number.isFinite(roleId)) continue;
-        options.push({ roleId, label: item.title || item.name, kind: "ai" });
-      }
-    } catch (error) {
-      console.warn("[Possession] 加载 AI 角色列表失败:", error);
-    }
-    possessionOptions.value = options;
-  } catch (error) {
-    console.warn("[Possession] 加载附身列表失败:", error);
-  }
-}
-
-/** 切换附身实体；成功后同步本地玩家名显示 */
-async function onPossessChange(event: Event) {
-  const roleId = Number((event.target as HTMLSelectElement).value);
-  if (!Number.isFinite(roleId)) return;
-  try {
-    const name = await possessEntity(roleId);
-    possessedRoleId.value = roleId;
-    gameStore.userName = name;
-    uiStore.showNotification({
-      type: "success",
-      title: t("game.dialog.possessSuccessTitle"),
-      message: t("game.dialog.possessSuccess", { name }),
-      duration: 2000,
-      skipTipsCheck: true,
-    });
-  } catch (error) {
-    // 失败时回退到后端实际状态，避免下拉显示与后端口径不一致
-    try {
-      const current = (await listIdentities()).find((item) => item.possessed);
-      if (current) possessedRoleId.value = current.role_id;
-    } catch (fallbackError) {
-      console.warn("[Possession] 回退附身状态失败:", fallbackError);
-    }
-    uiStore.showNotification({
-      type: "warning",
-      title: t("game.dialog.possessFailedTitle"),
-      message: String(error),
-      skipTipsCheck: true,
-    });
-  }
-}
+// ===== 附身同步 =====
+// 附身/身份切换只更新玩家名与副标题缓存（identity:possessed → gameStore）。
+// 空闲态下把它们同步到对话框头部标题；对话中标题由当前角色名驱动，此处不覆盖，
+// 避免把正在说话的 AI 名字顶掉。
+watch([() => gameStore.userName, () => gameStore.userSubtitle], ([name, subtitle]) => {
+  if (currentStatus.value !== "input") return;
+  uiStore.showCharacterTitle = name;
+  uiStore.showCharacterSubtitle = subtitle;
+});
 
 // 标题栏（角色名 + 副标题）切换 key：任一变化时整体一起滑出/滑入
 const titleSubtitleKey = computed(
@@ -757,9 +660,6 @@ onMounted(async () => {
   window.addEventListener("resize", updateContainerWidth);
 
   initScreenshot();
-
-  // 附身切换列表（身份 + AI 角色）；失败只告警，不影响对话框其它功能
-  void loadPossessionOptions();
 });
 
 onUnmounted(() => {

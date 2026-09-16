@@ -426,13 +426,23 @@ export function initializeTauriEventListeners() {
   // === 附身事件（玩家侧行为，与 AI 侧角色切换 character:switch 分离）===
 
   listen("identity:possessed", (event) => {
-    const payload = event.payload as { role_id: number; name: string };
+    const payload = event.payload as { role_id: number; name: string; subtitle: string };
     console.log("[Tauri] identity:possessed", payload);
     const gameStore = useGameStore();
-    // 玩家名真相源已在后端搬进实体行，这里只同步前端展示缓存
+    // 玩家名/副标题真相源已在后端搬进实体行，这里只同步前端展示缓存；
+    // possessedRoleId 用于设置页高亮「当前扮演」并防呆，属于会话态。
+    gameStore.possessedRoleId = payload?.role_id ?? 0;
     if (payload?.name) {
       gameStore.userName = payload.name;
     }
+    gameStore.userSubtitle = payload?.subtitle ?? "";
+  });
+
+  // 角色/身份列表变更广播（身份 CRUD、角色设置保存、插件资源变动等）：
+  // 订阅方只需自增版本号，由各列表自行重拉，避免事件负载膨胀。
+  listen("role:list-updated", () => {
+    const gameStore = useGameStore();
+    gameStore.roleListVersion += 1;
   });
 
   // === LLM 场景工具事件 ===
