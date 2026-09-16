@@ -855,7 +855,7 @@ pub(crate) async fn consume_sentence(
     }
 
     // 4. 写入 GameStatus
-    add_assistant_line(deps, &response).await?;
+    add_assistant_line(deps, &mut response).await?;
 
     Ok(Some(response))
 }
@@ -1042,8 +1042,8 @@ async fn build_reply_response(
     Ok(response)
 }
 
-/// Step D: 将 assistant LINE 写入 GameStatus。
-async fn add_assistant_line(deps: &SentenceDeps, response: &ReplyResponse) -> Result<()> {
+/// Step D: 将 assistant LINE 写入 GameStatus，并回填该行随 `ai:reply` 下发的 TTS 序号。
+async fn add_assistant_line(deps: &SentenceDeps, response: &mut ReplyResponse) -> Result<()> {
     // 试玩代号守卫：试玩任务被中止后，游离的 consumer 任务仍会带着旧代号继续
     // 生成句子。此时 GameStatus 可能已还原回自由对话，写入会把试玩台词漏进
     // 自由对话的上下文与历史。捕获代号与当前值不一致即丢弃整条（含记忆同步）。
@@ -1074,5 +1074,9 @@ async fn add_assistant_line(deps: &SentenceDeps, response: &ReplyResponse) -> Re
     };
     let mut gs = deps.game_status.lock().await;
     gs.add_line(&deps.db, line).await?;
+    // 行落库后再取号，保证序号与该行在 line_list 中的实际位置一致；
+    // 前端回传这个序号调 generate_line_voice，无需自行计数。
+    response.tts_seq =
+        crate::api::chat::tts_seq_at(&gs.line_list, gs.line_list.len().saturating_sub(1));
     Ok(())
 }

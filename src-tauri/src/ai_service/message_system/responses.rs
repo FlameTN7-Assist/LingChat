@@ -66,6 +66,12 @@ pub struct ReplyResponse {
     /// 流式回复：代号与当前轮不一致即过期。自由对话/正式剧本为 `None`。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview_gen: Option<u64>,
+    /// 该回复新增的 assistant 台词行的 TTS 序号（0-based），口径与
+    /// `generate_line_voice` 的 `line_seq` 完全一致。前端直接携带该序号回传即可，
+    /// 无需在本地历史上重数——序号由后端统一下发才能避免计数漂移造成语音错位。
+    /// `None`（不序列化）表示该行不可补生成语音：纯动作行、无关联角色或未成功写入。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tts_seq: Option<u32>,
 }
 
 impl ReplyResponse {
@@ -88,6 +94,7 @@ impl ReplyResponse {
             user_message_seq: None,
             thinking: None,
             preview_gen: None,
+            tts_seq: None,
         }
     }
 }
