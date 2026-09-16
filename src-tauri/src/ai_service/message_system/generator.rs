@@ -122,6 +122,16 @@ impl MessageGenerator {
         let original_msg = user_message.unwrap_or_default();
 
         loop {
+            // 每轮记录生成判据：附身实体应休眠跳过，便于排查"无人回应"
+            {
+                let gs = self.deps.game_status.lock().await;
+                tracing::info!(
+                    "生成轮次开始: current_role_id={:?}, possessed={}, 休眠跳过={}",
+                    gs.current_role_id,
+                    gs.possessed_role_id,
+                    gs.current_role_id.is_some_and(|rid| gs.is_possessed(rid)),
+                );
+            }
             // 取当前角色记忆（每轮重新获取，因为 current_role_id 可能已变化）
             let context = self.get_current_context().await?;
             if context.is_empty() {
@@ -272,7 +282,7 @@ impl MessageGenerator {
             tracing::error!("生成消息的时候没有当前角色，取消生成");
             return Ok(Vec::new());
         };
-        if rid == gs.possessed_role_id {
+        if gs.is_possessed(rid) {
             tracing::info!("当前角色 {} 正被玩家附身，AI 生成休眠", rid);
             return Ok(Vec::new());
         }
@@ -350,11 +360,11 @@ impl MessageGenerator {
         };
 
         // 选中当前被附身实体 = 上帝把话筒交还玩家，保持现状
-        let possessed = {
+        let return_to_player = {
             let gs = self.deps.game_status.lock().await;
-            gs.possessed_role_id
+            gs.is_possessed(selected_role_id)
         };
-        if selected_role_id == possessed {
+        if return_to_player {
             return Ok(());
         }
 
@@ -412,11 +422,11 @@ impl MessageGenerator {
         };
 
         // 选中当前被附身实体 = 交还玩家
-        let possessed = {
+        let (return_to_player, possessed) = {
             let gs = self.deps.game_status.lock().await;
-            gs.possessed_role_id
+            (gs.is_possessed(selected_role_id), gs.possessed_role_id)
         };
-        if selected_role_id == possessed {
+        if return_to_player {
             return Ok((false, possessed));
         }
 

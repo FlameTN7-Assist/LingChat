@@ -9,20 +9,16 @@ use anyhow::{anyhow, Result};
 use sea_orm::DatabaseConnection;
 
 use crate::ai_service::game_system::game_status::GameStatus;
-use crate::ai_service::game_system::role_manager::user_identity_settings;
-use crate::ai_service::types::PLAYER_ROLE_ID;
-use crate::db::entities::line::LineAttribute;
-use crate::db::entities::role::RoleType;
 use crate::db::managers::role_repo::RoleRepo;
-use crate::utils::prompt::{PromptOptions, sys_prompt_builder_by_settings};
+use crate::utils::prompt::PromptOptions;
 
 /// 把玩家附身到指定实体上，返回该实体的显示名。
 ///
 /// 附身后：
 /// 1. 实体必须"在场"（否则感知不到台词，God Agent 也看不见它）；
-/// 2. 若当前对话对象恰好是该实体（自己跟自己说话的死锁），自动切到默认身份或
-///    在场的另一个非附身实体；
-/// 3. 重建全部 SYSTEM 人设行（玩家名嵌在每条 AI 人设里）。
+/// 2. 若当前对话对象恰好是该实体（自己跟自己说话的死锁），把话筒移交给在场的
+///    另一个 AI；没有可移交给的 AI（真·一对一）则拒绝附身；
+/// 3. 重建全部 SYSTEM 人设行（玩家名嵌在每条 AI 人设里），并为被附身实体补建人设。
 pub async fn possess_entity(
     gs: &mut GameStatus,
     db: &DatabaseConnection,
@@ -33,6 +29,34 @@ pub async fn possess_entity(
         .await?
         .ok_or_else(|| anyhow!("实体不存在: role_id={}", role_id))?;
 
+    // ── 校验阶段：所有拒绝都在任何状态修改之前返回 ──
+    if gs.script_status.is_some() {
+        return Err(anyhow!("剧本/试玩进行中，无法切换扮演"));
+    }
+
+    // 玩家身份集合与 God Agent 判据同源（role_repo）。校验阶段只读不入缓存，
+    // 保证被拒绝时 GameStatus 完全不被改动；通过后再写回缓存。
+    let human_role_ids = RoleRepo::get_user_role_ids(db).await?;
+
+    // 附身当前对话对象意味着原发言者要被玩家接管：必须把话筒移交给另一个在场 AI，
+    // 否则就成了"自己跟自己说话"。User 身份实体永不由 AI 生成（冻结待机语义），
+    // 故接管者只能是 AI；真·一对一没有可移交对象时直接拒绝附身。
+    // 候选排除被附身目标本身与全部 User 身份；正在被玩家附身的 AI 切换后即恢复
+    // AI 控制，可以承接话筒。
+    let handoff = if gs.current_role_id == Some(role_id) {
+        gs.present_role_ids
+            .iter()
+            .copied()
+            .find(|id| *id != role_id && !human_role_ids.contains(id))
+    } else {
+        None
+    };
+    if gs.current_role_id == Some(role_id) && handoff.is_none() {
+        return Err(anyhow!("不能附身正在对话的角色"));
+    }
+
+    // 校验通过：缓存玩家身份集合供后续判据使用，从此处开始改动状态
+    gs.human_role_ids = human_role_ids;
     gs.possessed_role_id = role_id;
     gs.refresh_possessed_cache(db).await?;
 
@@ -45,74 +69,19 @@ pub async fn possess_entity(
         gs.present_role_ids.insert(role_id);
     }
 
-    // 当前对话对象 = 刚被附身的实体：此时继续生成就是"自己对自己说话"。
-    // 默认身份 id=0 可作为 AI 扮演的玩家分身接话；若连它都被附身，
-    // 退而求其次选在场另一个非附身实体。
-    if gs.current_role_id == Some(role_id) {
-        let fallback = if role_id != PLAYER_ROLE_ID {
-            Some(PLAYER_ROLE_ID)
-        } else {
-            gs.present_role_ids.iter().copied().find(|id| *id != role_id)
-        };
-        gs.current_role_id = fallback;
+    // 死锁回退：把当前对话对象移交给选定的在场 AI
+    if handoff.is_some() {
+        gs.current_role_id = handoff;
     }
 
-    rebuild_system_lines(gs, db, prompt_options).await?;
+    gs.rebuild_system_prompts(db, prompt_options).await?;
+
+    tracing::info!(
+        "附身成功: possessed_role_id={}, current_role_id={:?}, present_role_ids={:?}",
+        gs.possessed_role_id,
+        gs.current_role_id,
+        gs.present_role_ids
+    );
 
     Ok(gs.player.user_name.clone())
-}
-
-/// 按最新附身信息重建全部 SYSTEM 人设行。
-///
-/// 为什么必须重建：统一实体后"玩家名"由 `sys_prompt_builder` 的 framing 前缀嵌进
-/// 每条 AI 人设，附身切换/身份改名后不同步，模型会继续以为在跟旧名字的人说话。
-/// 做法是按行 sender 重新调用构建器，**保留行 id 只替换 content**——严禁字符串替换，
-/// 否则既可能漏改格式提示里的名字，也可能误伤正文中恰好同名的词。
-///
-/// AI 角色优先取内存中已加载的最新 settings，未加载才回盘；User 实体用合成 settings。
-pub async fn rebuild_system_lines(
-    gs: &mut GameStatus,
-    db: &DatabaseConnection,
-    prompt_options: PromptOptions,
-) -> Result<()> {
-    let data_dir = crate::api::data_dir();
-    let player_name = gs.player.user_name.clone();
-
-    let system_indices: Vec<usize> = gs
-        .line_list
-        .iter()
-        .enumerate()
-        .filter(|(_, line)| matches!(line.attribute(), LineAttribute::System))
-        .map(|(index, _)| index)
-        .collect();
-
-    for index in system_indices {
-        let Some(role_id) = gs.line_list[index].base.sender_role_id else {
-            continue;
-        };
-        let Some(role) = RoleRepo::get_role_by_id(db, role_id).await? else {
-            continue;
-        };
-        // 先取出内存 settings 并立即释放对 role_manager 的借用，避免跨越磁盘查询的 await
-        let loaded_settings = gs
-            .role_manager
-            .get_loaded(role_id)
-            .map(|loaded| loaded.settings.clone());
-        let settings = if role.role_type == RoleType::User {
-            let profile = RoleRepo::get_role_profile(db, role_id).await?;
-            user_identity_settings(&role, &profile)
-        } else if let Some(settings) = loaded_settings {
-            settings
-        } else {
-            match RoleRepo::get_role_settings_by_id(db, &data_dir, role_id).await? {
-                Some(settings) => settings,
-                None => continue,
-            }
-        };
-        gs.line_list[index].base.content =
-            sys_prompt_builder_by_settings(&settings, prompt_options, &player_name);
-    }
-
-    gs.refresh_memories(db).await?;
-    Ok(())
 }

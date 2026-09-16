@@ -13,7 +13,9 @@ use crate::ai_service::game_system::role_manager::GameRoleManager;
 use crate::ai_service::game_system::script_engine::ScriptManager;
 use crate::ai_service::llm::LlmSlot;
 use crate::ai_service::tts::local::LocalTtsRuntime;
-use crate::ai_service::types::{CharacterSettings, GameLine, LineAttributeExt, LineBase};
+use crate::ai_service::types::{
+    CharacterSettings, GameLine, LineAttributeExt, LineBase, PLAYER_ROLE_ID,
+};
 use crate::config::tts::TtsConfig;
 use crate::db::entities::line::LineAttribute;
 use crate::utils::prompt::{PromptOptions, sys_prompt_builder};
@@ -187,6 +189,13 @@ impl AIService {
         gs.onstage_role_ids.clear();
         gs.present_role_ids.clear();
         gs.entry_greeting_done = false;
+        // 切角色/重开 = 会话态清零：附身回落到默认身份实体。读档恢复附身由
+        // apply_snapshot 负责，两处语义必须一致。
+        gs.possessed_role_id = PLAYER_ROLE_ID;
+        // 玩家身份集合可能因增删身份而与缓存不一致，新会话开始前校正
+        if let Err(e) = gs.refresh_human_role_ids(&self.db).await {
+            tracing::warn!("清档后刷新玩家身份缓存失败: {e}");
+        }
     }
 
     pub async fn set_active_save_id(&mut self, save_id: Option<i32>) {

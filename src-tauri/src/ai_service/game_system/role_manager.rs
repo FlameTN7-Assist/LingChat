@@ -565,6 +565,35 @@ impl GameRoleManager {
         true
     }
 
+    /// 用最新配置刷新已加载角色的**人设字段**（不含 TTS/Live2D）。
+    ///
+    /// 人设是 SYSTEM 行的内容来源；改名/改人设后必须热更新内存副本，否则重建
+    /// SYSTEM 行仍会取到旧值。返回角色当前是否已加载；未加载时磁盘配置会在
+    /// 下次注册角色时自然生效。
+    pub fn update_role_persona_settings(
+        &mut self,
+        role_id: i32,
+        settings: &CharacterSettings,
+    ) -> bool {
+        let Some(role) = self.loaded_roles.get_mut(&role_id) else {
+            tracing::info!("角色 {} 尚未加载，人设设置将在下次加载时生效", role_id);
+            return false;
+        };
+        role.settings.system_prompt = settings.system_prompt.clone();
+        role.settings.ai_name = settings.ai_name.clone();
+        role.settings.ai_subtitle = settings.ai_subtitle.clone();
+        role.settings.info = settings.info.clone();
+        role.settings.system_prompt_example = settings.system_prompt_example.clone();
+        role.settings.system_prompt_example_old = settings.system_prompt_example_old.clone();
+        // display_name 是展示署名，跟随 ai_name 同步；ai_name 为空时保持原值
+        if !role.settings.ai_name.trim().is_empty() {
+            role.display_name = Some(role.settings.ai_name.clone());
+        }
+        // 已知限制：PersistentMemorySystem 在构造时固化了 display_name（用于压缩提示
+        // 署名），此处热更新不会同步已构造的压缩系统，改名后的压缩署名需等其重建才生效。
+        true
+    }
+
     /// 更新已加载角色的语音语言并重新初始化其 VoiceMaker。
     pub fn update_role_voice_lang(&mut self, role_id: i32, lang: &str) {
         let Some(role) = self.loaded_roles.get_mut(&role_id) else {

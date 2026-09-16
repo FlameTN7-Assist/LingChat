@@ -4,7 +4,6 @@ use tauri::{AppHandle, Manager};
 use crate::AppState;
 use crate::ai_service::game_system::auto_save;
 use crate::ai_service::game_system::game_status::GameStatusSnapshot;
-use crate::ai_service::game_system::possession;
 use crate::api::game::WebInitData;
 use crate::api::game::build_web_init_data;
 use crate::config::AppConfig;
@@ -265,7 +264,7 @@ pub async fn load_save(app: AppHandle, save_id: i32) -> Result<WebInitData, Stri
         // 快照里的附身实体可能与初始化时不同，而 SYSTEM 人设里嵌着玩家名；
         // 附身变了就重建，避免模型仍以为在跟上一个身份说话。
         if gs.possessed_role_id != possessed_before {
-            if let Err(e) = possession::rebuild_system_lines(&mut gs, db, prompt_options).await {
+            if let Err(e) = gs.rebuild_system_prompts(db, prompt_options).await {
                 tracing::warn!("载入存档后重建角色人设失败: {}", e);
             }
         }
