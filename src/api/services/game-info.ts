@@ -44,6 +44,10 @@ export interface GameLineInit {
   thinking: string | null;
   /** 该台词的第二语言（日语）译文，供日文界面显示 */
   tts_content: string | null;
+  /** 该行的 TTS 序号（0-based）：仅「可补生成语音」的 AI 行（assistant、有正文、
+   *  有关联角色）有值，其余为 null。序号由后端统一下发，前端只携带回传给
+   *  generate_line_voice，不再自行在本地历史上计数——两侧各自计数必然漂移。 */
+  tts_seq: number | null;
 }
 
 // 2. 定义完整的初始化数据接口 (对应 Rust WebInitData)

@@ -271,8 +271,9 @@
     thinking?: string;
     /** 该台词在 dialogHistory 中的绝对下标（生成语音后写回用） */
     absIndex: number;
-    /** AI 台词全局序号（0-based，供后端定位台词；与后端 Assistant 行计数一致） */
-    lineSeq?: number;
+    /** 该行后端下发的 TTS 序号（0-based），直接回传给后端定位台词；
+     *  undefined = 该行不可补生成语音（用户消息/旁白/无角色行），按钮不渲染 */
+    ttsSeq?: number;
   }
 
   interface HistoryBlock {
@@ -328,23 +329,6 @@
   });
 
   // --- 分组历史（与 SettingsHistory 同步逻辑）---
-  // AI 台词全局序号（镜像后端 generate_line_voice 的计数规则：
-  // 只数 type=reply、有正文、且关联了角色的行，不分页、不依赖回合锚点，
-  // 自由对话/开场白/主动对话/剧本台词都能定位；无角色的行（工具调用回填）
-  // 跳过，避免实时与重载后计数漂移）
-  const lineSeqs = computed<Map<number, number>>(() => {
-    const map = new Map<number, number>();
-    let seq = 0;
-    dialogHistory.value.forEach((msg, absIndex) => {
-      if (!msg.content || msg.content.trim() === "") return;
-      if (msg.type === "reply" && msg.senderRoleId != null) {
-        map.set(absIndex, seq);
-        seq += 1;
-      }
-    });
-    return map;
-  });
-
   const groupedHistory = computed<HistoryBlock[]>(() => {
     const blocks: HistoryBlock[] = [];
 
@@ -378,7 +362,7 @@
         userMessageSeq: msg.userMessageSeq,
         thinking: msg.thinking,
         absIndex,
-        lineSeq: lineSeqs.value.get(absIndex),
+        ttsSeq: msg.ttsSeq,
       };
 
       const last = blocks.length > 0 ? blocks[blocks.length - 1] : null;
@@ -470,6 +454,7 @@
             user_message_seq: l.user_message_seq,
             thinking: l.thinking ?? null,
             tts_content: l.tts_content ?? null,
+            tts_seq: l.tts_seq ?? null,
           })
         )
       );
@@ -501,8 +486,8 @@
   const generatingVoiceKeys = ref<Set<string>>(new Set());
 
   function voiceKey(entry: LineEntry): string | null {
-    if (entry.lineSeq === undefined) return null;
-    return String(entry.lineSeq);
+    if (entry.ttsSeq === undefined) return null;
+    return String(entry.ttsSeq);
   }
 
   function canGenerateVoice(entry: LineEntry): boolean {
@@ -515,12 +500,13 @@
   }
 
   async function generateVoice(entry: LineEntry) {
-    const key = voiceKey(entry);
-    if (key === null || generatingVoiceKeys.value.has(key)) return;
+    const lineSeq = entry.ttsSeq;
+    if (lineSeq === undefined) return;
+    const key = String(lineSeq);
+    if (generatingVoiceKeys.value.has(key)) return;
 
     generatingVoiceKeys.value.add(key);
     try {
-      const lineSeq = Number(key);
       const fileName = await invoke<string>("generate_line_voice", {
         lineSeq,
       });

@@ -45,6 +45,8 @@ export default class DialogueProcessor implements IEventProcessor {
       thinking: event.thinking,
       ttsText: event.ttsText,
       senderRoleId: event.roleId,
+      // 携带后端统一下发的 TTS 序号，历史页「生成语音」据此回传，避免前端计数漂移
+      ttsSeq: event.ttsSeq,
     });
 
     // 回溯更新最近一条没有序号标记的用户消息（前端发送消息时尚未拿到序号）
