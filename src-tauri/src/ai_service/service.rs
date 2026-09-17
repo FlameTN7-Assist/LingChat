@@ -101,6 +101,11 @@ impl AIService {
 
         let mut gs = self.game_status.lock().await;
 
+        // 玩家名已搬到实体行（id=0 玩家身份的 name + profile）。初始化前先刷新缓存，
+        // 使 system prompt 与 gs.player 同源；AI 的 settings.yml 只读 user_name 字段
+        // 已不再作为玩家名真相源。
+        gs.refresh_possessed_cache(&self.db).await?;
+
         let settings = gs
             .role_manager
             .get_role(&self.db, cid)
@@ -109,15 +114,14 @@ impl AIService {
             .clone();
 
         let ai_prompt = sys_prompt_builder(
-            &settings.user_name.clone(),
+            &gs.player.user_name.clone(),
             &settings.ai_name.clone(),
             &settings.system_prompt.clone().unwrap_or(default_prompt),
             settings.system_prompt_example.clone().as_deref(),
             settings.system_prompt_example_old.clone().as_deref(),
             prompt_options,
         );
-        gs.player.user_name = settings.user_name.clone();
-        gs.player.user_subtitle = settings.user_subtitle.clone().unwrap_or_default();
+        // gs.player 的 user_name/user_subtitle 由 refresh_possessed_cache 维护，不再直接赋值
 
         // 此处是初始角色被注册的地方
         let _ = gs.get_role(&self.db, cid).await?;

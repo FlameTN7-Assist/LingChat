@@ -634,6 +634,14 @@ impl std::hash::Hash for GameRole {
 // Player
 // ==========================================
 
+/// 默认玩家身份实体在 `role` 表中的固定 id。
+///
+/// 该行永存且不可删（`RoleRepo::SYSTEM_PROTECTED_ROLE_IDS`），因此历史台词
+/// 的 `sender_role_id = 0` 无需任何改写：附身切换只改变"当前附身谁"，
+/// "这条台词原本归属默认身份"的语义天然保留。运行时所有涉及玩家归属的判断
+/// 都应引用本常量，不再散落字面值 0。
+pub const PLAYER_ROLE_ID: i32 = 0;
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Player {
     pub user_name: String,

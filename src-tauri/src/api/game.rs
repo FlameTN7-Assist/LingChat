@@ -13,11 +13,12 @@ use crate::ai_service::message_system::generator::{
     GeneratorDeps, GeneratorSource, MessageGenerator,
 };
 use crate::ai_service::types::{
-    CharacterSettings, GameLine, LineAttributeExt, LineBase, Live2dSettings,
+    CharacterSettings, GameLine, LineAttributeExt, LineBase, Live2dSettings, PLAYER_ROLE_ID,
 };
 use crate::config::{self, AppConfig};
 use crate::db::entities::line;
 use crate::db::entities::line::LineAttribute;
+use crate::db::managers::role_repo::RoleRepo;
 use crate::utils::prompt::{PromptOptions, PromptRole, sys_prompt_builder_by_settings};
 
 // ========== 响应类型 ==========
@@ -114,7 +115,7 @@ pub struct GameLineInit {
     pub action_content: Option<String>,
     pub audio_file: Option<String>,
     pub perceived_role_ids: Vec<i32>,
-    /// 玩家消息序号（1-indexed），仅对 sender_role_id == Some(0) 的 User 行有值
+    /// 玩家消息序号（1-indexed），仅「玩家身份实体（role_type=User，含 id=0）」的 user 行有值
     pub user_message_seq: Option<u32>,
     /// 该轮生成的思考链（仅每轮最后一条 assistant 行有值）。
     pub thinking: Option<String>,
@@ -388,13 +389,23 @@ pub async fn clear_conversation(app: AppHandle) -> Result<WebInitData, String> {
 }
 
 /// 为台词列表计算玩家消息序号（1-indexed）。
-/// 玩家消息由 `sender_role_id == Some(0) && attribute == User` 标识。
-pub fn compute_user_message_seqs(line_list: &[GameLine]) -> Vec<Option<u32>> {
+///
+/// 玩家消息 = `sender` 属于玩家身份实体集合（`role_type=User`，含 id=0）且
+/// `attribute == User`。被附身的 AI 角色其发言 sender 是 AI 实体，不在该集合内——
+/// 它在本行语义上是 assistant，不作为回溯定位点。
+pub fn compute_user_message_seqs(
+    line_list: &[GameLine],
+    human_role_ids: &HashSet<i32>,
+) -> Vec<Option<u32>> {
     let mut count = 0u32;
     line_list
         .iter()
         .map(|gl| {
-            if gl.base.sender_role_id == Some(0) && matches!(gl.attribute(), LineAttribute::User) {
+            let is_human = gl
+                .base
+                .sender_role_id
+                .is_some_and(|id| human_role_ids.contains(&id));
+            if is_human && matches!(gl.attribute(), LineAttribute::User) {
                 count += 1;
                 Some(count)
             } else {
@@ -409,7 +420,7 @@ pub(crate) async fn build_web_init_data(
     service: &crate::ai_service::service::AIService,
     app: &AppHandle,
 ) -> Result<WebInitData, String> {
-    let character_settings = {
+    let mut character_settings = {
         let cid = service.init_character_id;
         let cid = match cid {
             Some(v) => v,
@@ -423,6 +434,11 @@ pub(crate) async fn build_web_init_data(
         )
     };
 
+    // 玩家身份实体集合：回溯序号按"身份"判定（低频读取路径，允许查库）
+    let human_role_ids = RoleRepo::get_user_role_ids(&service.db)
+        .await
+        .map_err(|e| format!("查询玩家身份失败: {}", e))?;
+
     let (
         lines,
         current_scene_id,
@@ -435,7 +451,7 @@ pub(crate) async fn build_web_init_data(
         scene_awareness_enabled,
     ) = {
         let mut gs = service.game_status.lock().await;
-        let seqs = compute_user_message_seqs(&gs.line_list);
+        let seqs = compute_user_message_seqs(&gs.line_list, &human_role_ids);
         let lines: Vec<GameLineInit> = gs
             .line_list
             .iter()
@@ -529,6 +545,14 @@ pub(crate) async fn build_web_init_data(
         )
     };
 
+    // 玩家名的真相源是实体行（possessed 缓存）。主角色 settings.yml 里那份 user_name
+    // 只在"搬家"时读过一次，可能已过时；这里统一覆盖，保证前端初始玩家名与后端一致。
+    {
+        let gs = service.game_status.lock().await;
+        character_settings.user_name = gs.player.user_name.clone();
+        character_settings.user_subtitle = gs.player.user_subtitle.clone();
+    }
+
     // 从 session store 恢复上次会话状态（服装、音乐、环境音）
     let (last_bgm_track, last_bgm_paused, last_bgm_mode, last_ambient_tracks) = {
         let store = app.store(config::STORE_FILE).ok();
@@ -590,7 +614,7 @@ pub(crate) async fn build_web_init_data(
 
 #[tauri::command]
 pub async fn add_role_to_scene(app: AppHandle, role_id: i32) -> Result<JsonValue, String> {
-    if role_id == 0 {
+    if role_id == PLAYER_ROLE_ID {
         return Err("无法添加玩家角色 (role_id=0)".to_string());
     }
 
@@ -634,8 +658,9 @@ pub async fn add_role_to_scene(app: AppHandle, role_id: i32) -> Result<JsonValue
             .clone()
             .unwrap_or_else(|| format!("角色{}", role_id));
 
-        // 构建角色的 system prompt
-        let system_prompt = sys_prompt_builder_by_settings(&role.settings, prompt_options);
+        // 构建角色的 system prompt（玩家名取自当前附身实体缓存）
+        let system_prompt =
+            sys_prompt_builder_by_settings(&role.settings, prompt_options, &gs.player.user_name);
 
         // ★ 注入 System 行必须在 onstage_role 之前。
         //    仅当台词表中不存在本角色的 System 行时才添加（避免退出后重入时重复）。
@@ -697,7 +722,7 @@ pub async fn add_role_to_scene(app: AppHandle, role_id: i32) -> Result<JsonValue
 
 #[tauri::command]
 pub async fn remove_role_from_scene(app: AppHandle, role_id: i32) -> Result<JsonValue, String> {
-    if role_id == 0 {
+    if role_id == PLAYER_ROLE_ID {
         return Err("无法移除玩家角色 (role_id=0)".to_string());
     }
 

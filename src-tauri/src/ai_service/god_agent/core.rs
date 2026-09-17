@@ -106,8 +106,12 @@ impl GodAgentCore {
         }
 
         // --- 当前发言者提示 ---
+        // 「玩家」= 当前被附身实体，附身后交还对象随之改变
+        let possessed = gs.possessed_role_id;
         let current_hint = match current_speaker {
-            Some(0) => "当前发言者是「玩家」。请选择下一个发言的 NPC 角色。\n".to_string(),
+            Some(id) if id == possessed => {
+                format!("当前发言者是「玩家」(role_id={})。请选择下一个发言的 NPC 角色。\n", possessed)
+            },
             Some(rid) => {
                 let name = gs
                     .role_manager
@@ -115,8 +119,8 @@ impl GodAgentCore {
                     .and_then(|r| r.display_name.clone())
                     .unwrap_or_else(|| format!("角色{}", rid));
                 format!(
-                    "当前发言者是「{}」(role_id={})，刚刚说完话。请判断：\n- 如果对话应该继续（比如另一个角色有强烈反应或话题未完），选择下一个发言的 NPC\n- 如果应该交还给玩家，选择 role_id=0\n",
-                    name, rid
+                    "当前发言者是「{}」(role_id={})，刚刚说完话。请判断：\n- 如果对话应该继续（比如另一个角色有强烈反应或话题未完），选择下一个发言的 NPC\n- 如果应该交还给玩家，选择 role_id={}\n",
+                    name, rid, possessed
                 )
             },
             None => String::new(),
@@ -144,12 +148,15 @@ impl GodAgentCore {
         let npc_ids: Vec<i32> = gs
             .present_role_ids
             .iter()
-            .filter(|&&id| id != 0)
+            .filter(|&&id| id != gs.possessed_role_id)
             .copied()
             .collect();
 
         if npc_ids.len() <= 1 {
-            return Ok((npc_ids.first().copied().unwrap_or(0), "single_npc".into()));
+            return Ok((
+                npc_ids.first().copied().unwrap_or(gs.possessed_role_id),
+                "single_npc".into(),
+            ));
         }
 
         let window = self.config.recent_window;
@@ -180,7 +187,10 @@ impl GodAgentCore {
         if let Some(ref tool_calls) = response.tool_calls {
             if let Some(tc) = tool_calls.first() {
                 if let Some(result) = tools::parse_speaker_selection(tc) {
-                    if result.0 == 0 || gs.present_role_ids.contains(&result.0) {
+                    // 被附身实体是「交还玩家」的合法目标，即便它不在场也允许
+                    if result.0 == gs.possessed_role_id
+                        || gs.present_role_ids.contains(&result.0)
+                    {
                         return Ok(result);
                     }
                     tracing::warn!("上帝Agent 选择了不在场的角色 {}，忽略", result.0);

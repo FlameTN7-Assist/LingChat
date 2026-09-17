@@ -1567,7 +1567,7 @@ impl PreviewSession {
         if let Err(e) = gs.get_role(db, main_id).await {
             gs.role_manager.invalidate_memory_history();
             gs.line_list.truncate(saved.line_len);
-            gs.apply_snapshot(&saved.scene);
+            gs.apply_snapshot(&saved.scene, db).await;
             gs.main_role_id = saved.main_role_id;
             gs.current_role_id = saved.current_role_id;
             gs.script_status = saved.script_status.map(|b| *b);
@@ -1588,11 +1588,13 @@ impl PreviewSession {
         if !uname.is_empty() {
             gs.player.user_name = uname;
         }
+        // 人设 SYSTEM 台词要嵌入玩家名；drop 前先取出当前值（试玩期间刚按主角卡覆盖过）
+        let player_name = gs.player.user_name.clone();
 
         // 人设 SYSTEM 台词。缺了它 role_manager 会警告「人设丢失」，
         // 而且 AI 对话会在没有人设的上下文里生成。
         drop(gs);
-        if let Some(prompt) = build_main_role_prompt(db, data_dir, main_id).await {
+        if let Some(prompt) = build_main_role_prompt(db, data_dir, main_id, &player_name).await {
             let line = crate::ai_service::types::LineBase {
                 content: prompt.text,
                 attribute: crate::ai_service::types::LineAttributeExt(
@@ -1626,7 +1628,7 @@ impl PreviewSession {
         gs.preview_generation = gs.preview_generation.wrapping_add(1);
         gs.role_manager.invalidate_memory_history();
         gs.line_list.truncate(self.line_len);
-        gs.apply_snapshot(&self.scene);
+        gs.apply_snapshot(&self.scene, db).await;
         gs.main_role_id = self.main_role_id;
         gs.current_role_id = self.current_role_id;
         gs.script_status = self.script_status.map(|b| *b);
@@ -1705,6 +1707,7 @@ async fn build_main_role_prompt(
     db: &DatabaseConnection,
     data_dir: &Path,
     role_id: i32,
+    player_name: &str,
 ) -> Option<MainRolePrompt> {
     use crate::utils::prompt::{PromptOptions, sys_prompt_builder_by_settings};
 
@@ -1726,8 +1729,8 @@ async fn build_main_role_prompt(
             role_id
         );
     }
-    // 用 by_settings 版本而不是自己拼参数：它会一并带上 settings.user_name，
-    // 与正式游玩走的是同一条构建路径
+    // 用 by_settings 版本而不是自己拼参数：它会一并带上统一装配的对话格式提示，
+    // 与正式游玩走的是同一条构建路径；玩家名由调用方传入当前附身实体名
     Some(MainRolePrompt {
         text: sys_prompt_builder_by_settings(
             &settings,
@@ -1735,6 +1738,7 @@ async fn build_main_role_prompt(
                 output_sec_lang: true,
                 no_emotion_limit: true,
             },
+            player_name,
         ),
         name: settings.ai_name,
     })

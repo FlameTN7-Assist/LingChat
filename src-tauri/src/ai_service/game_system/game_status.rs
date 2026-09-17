@@ -8,14 +8,25 @@ use serde_json::Value;
 
 use crate::ai_service::game_system::role_manager::GameRoleManager;
 use crate::ai_service::types::{
-    GameLine, GameRole, LineAttributeExt, LineBase, Player, ScriptStatus,
+    GameLine, GameRole, LineAttributeExt, LineBase, PLAYER_ROLE_ID, Player, ScriptStatus,
 };
 use crate::db::entities::line::LineAttribute;
+use crate::db::managers::role_repo::RoleRepo;
 use crate::utils::prompt::PromptRole;
 
 /// 存储所有运行时共享的游戏状态。
 pub struct GameStatus {
+    /// 玩家名/副标题/人设的**缓存视图**，默认只经 `refresh_possessed_cache` 维护。
+    /// 真相源是 `role` 表 + `profile_json`：全局有大量 `player.user_name` 读取点
+    /// （占位符替换、提示词构建、前端展示），缓存起来避免每个读取点各自查库。
+    /// 例外仅两处、均不入库且可被下一次 refresh 冲掉：剧本 `script_settings` 临时覆盖、
+    /// 编辑器试玩的快照备份与还原。
     pub player: Player,
+
+    /// 当前被玩家附身的实体 role_id。默认 `PLAYER_ROLE_ID`（默认身份实体）。
+    /// 附身是会话态而非实体属性，因此不写回 `role.role_type`；它决定玩家台词的
+    /// `sender_role_id` 与被附身 AI 的生成休眠。
+    pub possessed_role_id: i32,
 
     /// 台词列表，用于记忆构建和历史记忆
     pub line_list: Vec<GameLine>,
@@ -68,6 +79,7 @@ impl GameStatus {
     pub fn new(role_manager: GameRoleManager) -> Self {
         Self {
             player: Player::default(),
+            possessed_role_id: PLAYER_ROLE_ID,
             line_list: Vec::new(),
             role_manager,
             current_role_id: None,
@@ -112,6 +124,27 @@ impl GameStatus {
         self.role_manager
             .sync_memories(db, &self.line_list, None)
             .await
+    }
+
+    /// 刷新玩家缓存视图：把当前被附身实体的名字/副标题/人设写回 `player`。
+    ///
+    /// 读不到实体（如刚被删除）时保留原值并告警，不阻断对话链路——缓存允许短暂滞后，
+    /// 下一轮附身/读档会再次校正。
+    pub async fn refresh_possessed_cache(&mut self, db: &DatabaseConnection) -> Result<()> {
+        let role_id = self.possessed_role_id;
+        let Some(role) = RoleRepo::get_role_by_id(db, role_id).await? else {
+            tracing::warn!("附身实体不存在，玩家缓存保持原值: role_id={}", role_id);
+            return Ok(());
+        };
+        let profile = RoleRepo::get_role_profile(db, role_id).await?;
+        self.player.user_name = if role.name.trim().is_empty() {
+            "玩家".to_string()
+        } else {
+            role.name
+        };
+        self.player.user_subtitle = profile.subtitle;
+        self.player.user_prompt = profile.prompt;
+        Ok(())
     }
 
     // ============ 全局变量便捷方法 ============
@@ -229,6 +262,7 @@ impl GameStatus {
         GameStatusSnapshot {
             present_role_ids: self.present_role_ids.iter().copied().collect(),
             current_role_id: self.current_role_id,
+            possessed_role_id: self.possessed_role_id,
             background: self.background.clone(),
             background_music: self.background_music.clone(),
             background_effect: self.background_effect.clone(),
@@ -240,8 +274,11 @@ impl GameStatus {
         }
     }
 
-    /// 从快照恢复场景状态
-    pub fn apply_snapshot(&mut self, snapshot: &GameStatusSnapshot) {
+    /// 从快照恢复场景状态。
+    ///
+    /// 尾部会按快照里的被附身实体刷新玩家缓存——`player` 是缓存视图，
+    /// 读档后必须与 `possessed_role_id` 同源，否则界面仍显示上一个存档的玩家名。
+    pub async fn apply_snapshot(&mut self, snapshot: &GameStatusSnapshot, db: &DatabaseConnection) {
         self.background = snapshot.background.clone();
         self.background_music = snapshot.background_music.clone();
         self.background_effect = snapshot.background_effect.clone();
@@ -257,6 +294,10 @@ impl GameStatus {
         self.present_role_ids = snapshot.present_role_ids.iter().copied().collect();
         self.onstage_role_ids = snapshot.present_role_ids.clone();
         self.scene_awareness_enabled = snapshot.scene_awareness_enabled;
+        self.possessed_role_id = snapshot.possessed_role_id;
+        if let Err(e) = self.refresh_possessed_cache(db).await {
+            tracing::warn!("应用快照后刷新附身缓存失败: {e}");
+        }
     }
 }
 
@@ -266,6 +307,10 @@ impl GameStatus {
 pub struct GameStatusSnapshot {
     pub present_role_ids: Vec<i32>,
     pub current_role_id: Option<i32>,
+    /// 当前被附身实体。旧存档无此字段 → `#[serde(default)]` 得 0，
+    /// 即回落到默认身份实体，与统一实体前的语义一致。
+    #[serde(default)]
+    pub possessed_role_id: i32,
     #[serde(default)]
     pub background: String,
     #[serde(default = "default_background_music")]

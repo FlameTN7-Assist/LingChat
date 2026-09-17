@@ -31,6 +31,7 @@ use crate::ai_service::translator::Translator;
 use crate::ai_service::types::{GameLine, LineAttributeExt, LineBase, LlmMessage};
 use crate::api::data_dir;
 use crate::db::entities::line::LineAttribute;
+use crate::db::managers::role_repo::RoleRepo;
 use crate::utils::prompt::PromptRole;
 
 /// MessageGenerator 的业务调用来源。
@@ -83,7 +84,8 @@ struct UserMessageContext {
     temp: Option<String>,
     /// 插入的用户行在 line_list 中的索引。
     line_index: Option<usize>,
-    /// 用户消息序号（1-indexed，按 sender_role_id==0 且 User 属性计数）。
+    /// 用户消息序号（1-indexed，按「玩家身份实体 sender」且 User 属性计数）。
+    /// 附身 AI 时本轮输入不属于玩家身份消息，为 None。
     seq: Option<u32>,
 }
 
@@ -186,25 +188,38 @@ impl MessageGenerator {
 
         let UserMessageOutcome { main, temp } = self.deps.processor.append_user_message(raw).await;
 
+        // 回溯序号按"玩家身份实体"（role_type=User，含默认身份 0）判定，与
+        // compute_user_message_seqs 同源；被附身的 AI 其发言不属于玩家身份消息。
+        let human_role_ids = RoleRepo::get_user_role_ids(&self.deps.db).await?;
+
         let mut gs = self.deps.game_status.lock().await;
         let user_name = gs.player.user_name.clone();
+        let sender_role_id = gs.possessed_role_id;
         let line = LineBase {
             content: main.clone(),
             attribute: LineAttributeExt(LineAttribute::User),
             display_name: Some(user_name),
-            sender_role_id: Some(0),
+            // 玩家台词的归属 = 当前被附身实体；默认身份仍是 PLAYER_ROLE_ID(0)
+            sender_role_id: Some(sender_role_id),
             ..Default::default()
         };
         gs.add_line(&self.deps.db, line).await?;
         let line_index = Some(gs.line_list.len().saturating_sub(1));
-        let seq = Some(
-            gs.line_list
-                .iter()
-                .filter(|l| {
-                    l.base.sender_role_id == Some(0) && matches!(l.attribute(), LineAttribute::User)
-                })
-                .count() as u32,
-        );
+        let seq = if human_role_ids.contains(&sender_role_id) {
+            Some(
+                gs.line_list
+                    .iter()
+                    .filter(|l| {
+                        l.base
+                            .sender_role_id
+                            .is_some_and(|id| human_role_ids.contains(&id))
+                            && matches!(l.attribute(), LineAttribute::User)
+                    })
+                    .count() as u32,
+            )
+        } else {
+            None
+        };
 
         Ok(UserMessageContext {
             processed: main,
@@ -247,12 +262,20 @@ impl MessageGenerator {
     }
 
     /// Step 2: 根据 current_role_id 获取当前角色的 memory 上下文。
+    ///
+    /// 被附身实体的生成休眠挂在这里：玩家正以它发言，AI 不能再替它说话。
+    /// 返回空上下文后，主循环与 `process_notification` 的 `is_empty()` 分支天然
+    /// 跳过本轮生成，无需改动主循环。
     async fn get_current_context(&self) -> Result<Vec<LlmMessage>> {
         let mut gs = self.deps.game_status.lock().await;
         let Some(rid) = gs.current_role_id else {
             tracing::error!("生成消息的时候没有当前角色，取消生成");
             return Ok(Vec::new());
         };
+        if rid == gs.possessed_role_id {
+            tracing::info!("当前角色 {} 正被玩家附身，AI 生成休眠", rid);
+            return Ok(Vec::new());
+        }
         let role = gs.get_role(&self.deps.db, rid).await?;
         Ok(role.memory.clone())
     }
@@ -326,8 +349,13 @@ impl MessageGenerator {
             god.decide_next_speaker(&gs, current_speaker).await?
         };
 
-        if selected_role_id == 0 {
-            return Ok(()); // 选择玩家，保持现状
+        // 选中当前被附身实体 = 上帝把话筒交还玩家，保持现状
+        let possessed = {
+            let gs = self.deps.game_status.lock().await;
+            gs.possessed_role_id
+        };
+        if selected_role_id == possessed {
+            return Ok(());
         }
 
         // 设定新的 current_role_id
@@ -383,9 +411,13 @@ impl MessageGenerator {
             god.decide_next_speaker(&gs, current_speaker).await?
         };
 
-        if selected_role_id == 0 {
-            // 交还玩家
-            return Ok((false, 0));
+        // 选中当前被附身实体 = 交还玩家
+        let possessed = {
+            let gs = self.deps.game_status.lock().await;
+            gs.possessed_role_id
+        };
+        if selected_role_id == possessed {
+            return Ok((false, possessed));
         }
 
         // 设定下一个说话者

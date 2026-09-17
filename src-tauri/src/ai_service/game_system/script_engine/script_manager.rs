@@ -289,7 +289,9 @@ impl ScriptManager {
         // Set script_status on GameStatus
         ctx.game_status.lock().await.script_status = Some(script.clone());
 
-        // Load player info from script settings
+        // 剧本级玩家名临时覆盖：直接写 player 缓存，语义是"本场剧本临时改名"，不落库。
+        // 附身切换或 refresh_possessed_cache 会把它冲回实体名，这是可接受的——
+        // 剧本作者应通过身份实体维护长期玩家名，settings 覆盖只影响本次运行。
         if let Some(user_name) = script.settings.get("user_name").and_then(|v| v.as_str()) {
             if !user_name.is_empty() {
                 ctx.game_status.lock().await.player.user_name = user_name.to_string();

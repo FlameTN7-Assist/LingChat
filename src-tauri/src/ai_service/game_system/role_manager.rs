@@ -11,9 +11,12 @@ use crate::ai_service::game_system::persistent_memory_system::{
 use crate::ai_service::llm::LlmSlot;
 use crate::ai_service::tts::VoiceMaker;
 use crate::ai_service::tts::local::LocalTtsRuntime;
-use crate::ai_service::types::{CharacterSettings, GameLine, GameMemoryBank, GameRole, LlmMessage};
+use crate::ai_service::types::{
+    CharacterSettings, GameLine, GameMemoryBank, GameRole, LlmMessage, RoleProfile,
+};
 use crate::config::tts::TtsConfig;
 use crate::db::entities::line::LineAttribute;
+use crate::db::entities::role::{Model as RoleModel, RoleType};
 use crate::db::managers::memory_repo::MemoryRepo;
 use crate::db::managers::role_repo::RoleRepo;
 
@@ -188,8 +191,17 @@ impl GameRoleManager {
         let role = RoleRepo::get_role_by_id(db, role_id).await?;
         let role = role.ok_or_else(|| anyhow!("角色 ID {} 未在数据库中找到", role_id))?;
 
-        let settings = RoleRepo::get_role_settings_by_id(db, &self.data_dir, role.id).await?;
-        let settings = settings.ok_or_else(|| anyhow!("角色 ID {} 的设置相关文件缺失", role_id))?;
+        // 玩家身份实体（role_type=User）没有资源目录与 settings.yml，人设存放在
+        // `profile_json`；这里按同一套 CharacterSettings 契约合成，让下游（提示词、
+        // 记忆、God Agent 简介）无需为"人"与"AI"分叉。AI 角色仍走磁盘 settings.yml。
+        let settings = if role.role_type == RoleType::User {
+            let profile = RoleRepo::get_role_profile(db, role.id).await?;
+            user_identity_settings(&role, &profile)
+        } else {
+            RoleRepo::get_role_settings_by_id(db, &self.data_dir, role.id)
+                .await?
+                .ok_or_else(|| anyhow!("角色 ID {} 的设置相关文件缺失", role_id))?
+        };
 
         let display_name = settings.ai_name.clone();
         let resource_path = role.resource_folder.clone();
@@ -272,10 +284,9 @@ impl GameRoleManager {
         let mut involved_ids: HashSet<i32> = HashSet::new();
         for line in source_lines {
             if let Some(sid) = line.sender_role_id() {
-                // 跳过 id 为 0 的角色（ 0 代表的是玩家，不参与记忆同步）
-                if sid != 0 {
-                    involved_ids.insert(sid);
-                }
+                // 玩家身份实体同构参与记忆构建：被 AI 控制时需要其短期记忆，
+                // 被玩家附身时台词按 sender 天然归属它，故不再跳过任何 sender。
+                involved_ids.insert(sid);
             }
             for rid in &line.perceived_role_ids {
                 involved_ids.insert(*rid);
@@ -341,7 +352,19 @@ impl GameRoleManager {
                 if let Some(sp) = Self::find_first_system_prompt(source_lines, rid) {
                     final_sliced.insert(0, sp.clone());
                 } else {
-                    tracing::warn!("role_id={} 没有找到 SYSTEM 属性的台词，可能人设丢失", rid);
+                    // 人设本就为空时（如玩家身份实体没填 prompt），SYSTEM 行缺失是预期，
+                    // 不应告警刷屏；只有配置了人设却找不到注入行才是真的异常。
+                    let persona_empty = self
+                        .loaded_roles
+                        .get(&rid)
+                        .and_then(|role| role.settings.system_prompt.as_deref())
+                        .map(|prompt| prompt.trim().is_empty())
+                        .unwrap_or(true);
+                    if persona_empty {
+                        tracing::debug!("role_id={} 无人设，跳过 SYSTEM 提示注入", rid);
+                    } else {
+                        tracing::warn!("role_id={} 没有找到 SYSTEM 属性的台词，可能人设丢失", rid);
+                    }
                 }
             }
 
@@ -691,6 +714,22 @@ impl GameRoleManager {
         self.memory_bank_systems
             .get(&role_id)
             .map(|s| s.is_enabled())
+    }
+}
+
+/// 为玩家身份实体合成 `CharacterSettings`（不读 settings.yml）。
+///
+/// User 实体没有资源目录，其人设存在 `role.name` + `profile_json`；下游统一按
+/// `CharacterSettings` 消费（提示词构建、记忆、God Agent 简介），所以在这里
+/// 做一次形状适配。语音相关字段保持默认（tts_type 为空 → 不构造 VoiceMaker）。
+pub fn user_identity_settings(role: &RoleModel, profile: &RoleProfile) -> CharacterSettings {
+    CharacterSettings {
+        ai_name: role.name.clone(),
+        ai_subtitle: Some(profile.subtitle.clone()),
+        system_prompt: Some(profile.prompt.clone()),
+        info: Some(profile.info.clone()),
+        character_id: Some(role.id),
+        ..Default::default()
     }
 }
 

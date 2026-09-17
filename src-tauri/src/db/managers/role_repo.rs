@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -9,7 +10,7 @@ use sea_orm::{
 };
 use tracing::warn;
 
-use crate::ai_service::types::{CharacterSettings, RoleProfile};
+use crate::ai_service::types::{CharacterSettings, PLAYER_ROLE_ID, RoleProfile};
 use crate::db::entities::line;
 use crate::db::entities::line_perception;
 use crate::db::entities::role::{
@@ -339,8 +340,8 @@ impl RoleRepo {
     // 统一实体：实体人设（profile_json）与玩家身份（role_type=User）
     // ==============================================================
 
-    // 本节方法属于 PR1 交付的数据层公面，运行时消费方（命令/附身链路）在后续 PR 接线，
-    // 现阶段仅单测调用；先豁免 dead_code，避免编译期噪音掩盖真实告警。
+    // 本节方法属于统一实体的数据层公面，运行时消费方在 api/identity.rs 与
+    // game_system/possession.rs；set_role_profile 目前仅供未来字段级写入使用。
 
     /// 从 `profile_json` 原文解析人设。
     /// NULL/空白/坏 JSON 一律静默回退默认值——该列是可空增量列，旧库升级后全为 NULL，
@@ -356,7 +357,6 @@ impl RoleRepo {
     }
 
     /// 读取实体人设（`role.profile_json`），缺失/损坏时返回默认人设。
-    #[allow(dead_code)]
     pub async fn get_role_profile(db: &DatabaseConnection, role_id: i32) -> Result<RoleProfile> {
         let Some(role) = Self::get_role_by_id(db, role_id).await? else {
             return Ok(RoleProfile::default());
@@ -384,7 +384,6 @@ impl RoleRepo {
 
     /// 列出全部玩家身份（role_type=User，按 id 升序），并附带解析好的人设。
     /// 排序固定升序：id=0 是默认身份，前端与运行时都需要稳定顺序。
-    #[allow(dead_code)]
     pub async fn list_player_identities(
         db: &DatabaseConnection,
     ) -> Result<Vec<(RoleModel, RoleProfile)>> {
@@ -402,10 +401,26 @@ impl RoleRepo {
             .collect())
     }
 
+    /// 全部玩家身份实体的 id 集合（`role_type=User`），恒含默认身份 0。
+    ///
+    /// 供"回溯定位"等按身份而非按当前附身判断玩家消息的链路使用：恒含 0 是历史兼容，
+    /// id=0 永存且旧存档台词 `sender_role_id=0` 必须继续被认作玩家消息。
+    pub async fn get_user_role_ids(db: &DatabaseConnection) -> Result<HashSet<i32>> {
+        let ids: Vec<i32> = role::Entity::find()
+            .select_only()
+            .column(role::Column::Id)
+            .filter(role::Column::RoleType.eq(RoleType::User))
+            .into_tuple()
+            .all(db)
+            .await?;
+        let mut set: HashSet<i32> = ids.into_iter().collect();
+        set.insert(PLAYER_ROLE_ID);
+        Ok(set)
+    }
+
     /// 新建玩家身份（role_type=User），返回新行 id。
     /// script/resource 键显式置 NULL：玩家身份不绑定剧本，也不能带人物资源目录，
     /// 否则会被 `role_sync` 当作可同步的剧本角色处理。
-    #[allow(dead_code)]
     pub async fn create_player_identity(
         db: &DatabaseConnection,
         name: &str,
@@ -427,18 +442,16 @@ impl RoleRepo {
     }
 
     /// 更新玩家身份的名字与人设。
-    /// 拒绝系统保护 id（0/1/2）：这些行承载历史台词归属与启动兜底，改名会波及全局。
-    /// 仅接受 role_type=User，避免误把 AI 角色行当玩家身份改写。
-    #[allow(dead_code)]
+    ///
+    /// 改名保护与删除保护是两级：`delete_player_identity` 拒绝系统保护 id（id=0 永存，
+    /// 不可删），但 id=0 作为**最常用的默认身份必须能改名/改人设**，故这里只校验
+    /// `role_type=User`——id=1 等 Main/Npc/System 行自然被类型检查挡下。
     pub async fn update_player_identity(
         db: &DatabaseConnection,
         role_id: i32,
         name: &str,
         profile: &RoleProfile,
     ) -> Result<()> {
-        if Self::is_system_protected_role(role_id) {
-            anyhow::bail!("系统保护角色不允许作为玩家身份修改: id={}", role_id);
-        }
         let Some(role) = Self::get_role_by_id(db, role_id).await? else {
             anyhow::bail!("玩家身份不存在: id={}", role_id);
         };
@@ -456,7 +469,6 @@ impl RoleRepo {
     /// 删除玩家身份，返回是否实际删除了行。
     /// 系统保护 id 或非 User 行一律"拒绝并返回 false"而非报错：
     /// 调用方（前端列表）对不可删项做静默处理即可，无需把它当异常流程分支。
-    #[allow(dead_code)]
     pub async fn delete_player_identity(db: &DatabaseConnection, role_id: i32) -> Result<bool> {
         if Self::is_system_protected_role(role_id) {
             warn!("拒绝删除系统保护的玩家身份: id={}", role_id);
@@ -723,23 +735,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn protected_and_non_user_identities_are_rejected() {
+    async fn update_protection_is_two_tiered_and_delete_blocks_default_identity() {
         let db = test_db().await;
         RoleRepo::ensure_user_role(&db).await.unwrap();
         insert_role(&db, 1, "Hero", RoleType::Main, Some("hero")).await;
 
-        // id=0 受保护：改不动、删不掉
-        assert!(
-            RoleRepo::update_player_identity(&db, 0, "x", &RoleProfile::default())
-                .await
-                .is_err()
-        );
-        assert!(!RoleRepo::delete_player_identity(&db, 0).await.unwrap());
+        // 改名保护低于删除保护：id=0 是系统保护行（不可删），但作为默认身份必须可改名/改人设
+        let profile = RoleProfile {
+            subtitle: "默认称号".into(),
+            prompt: "默认人设".into(),
+            ..Default::default()
+        };
+        RoleRepo::update_player_identity(&db, 0, "阿宅", &profile).await.unwrap();
         let user = RoleRepo::get_role_by_id(&db, 0).await.unwrap().unwrap();
-        assert_eq!(user.name, "User");
+        assert_eq!(user.name, "阿宅");
         assert_eq!(user.role_type, RoleType::User);
+        assert_eq!(RoleRepo::get_role_profile(&db, 0).await.unwrap(), profile);
 
-        // AI 角色行不是玩家身份：update 报错、delete 拒绝
+        // 删除保护保持不变：id=0 永存
+        assert!(!RoleRepo::delete_player_identity(&db, 0).await.unwrap());
+
+        // AI 角色行不是玩家身份：update 被类型检查拒绝、delete 拒绝
         assert!(
             RoleRepo::update_player_identity(&db, 1, "x", &RoleProfile::default())
                 .await
