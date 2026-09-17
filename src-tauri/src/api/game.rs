@@ -19,7 +19,6 @@ use crate::api::identity::{emit_possessed, PossessedInfo};
 use crate::config::{self, AppConfig};
 use crate::db::entities::line;
 use crate::db::entities::line::LineAttribute;
-use crate::db::managers::role_repo::RoleRepo;
 use crate::utils::prompt::{PromptOptions, PromptRole, sys_prompt_builder_by_settings};
 
 // ========== 响应类型 ==========
@@ -426,14 +425,9 @@ pub async fn clear_conversation(app: AppHandle) -> Result<WebInitData, String> {
 /// 为台词列表计算玩家消息序号（1-indexed）。
 ///
 /// 判定以行为为准：`attribute == User` 且有明确发送者即算玩家发言。被附身 AI
-/// 实体替玩家发出的台词 sender 虽是 AI 实体，attribute 仍是 User，若再按 sender
-/// 是否属于玩家身份集合过滤会漏掉这些真实的玩家发言；sender 为空的系统旁白
-/// （如入场/退场提示）不计入。`human_role_ids` 已不参与判定，保留参数以免
-/// 调用方签名变动。
-pub fn compute_user_message_seqs(
-    line_list: &[GameLine],
-    _human_role_ids: &HashSet<i32>,
-) -> Vec<Option<u32>> {
+/// 实体替玩家发出的台词 sender 虽是 AI 实体，attribute 仍是 User，按行为判定
+/// 才能覆盖这些真实的玩家发言；sender 为空的系统旁白（如入场/退场提示）不计入。
+pub fn compute_user_message_seqs(line_list: &[GameLine]) -> Vec<Option<u32>> {
     let mut count = 0u32;
     line_list
         .iter()
@@ -455,11 +449,8 @@ pub fn compute_user_message_seqs(
 /// 两类序号都必须由后端统一计算：前端只在本地历史上按同规则重数时，任何一侧
 /// 的事件丢失都会让两份列表漂移，进而把「生成语音」定位到错误的台词上。
 /// 初始化与回溯共用本函数，保证同一行在全链路始终拿到同一个序号。
-pub(crate) fn build_game_line_inits(
-    line_list: &[GameLine],
-    human_role_ids: &HashSet<i32>,
-) -> Vec<GameLineInit> {
-    let user_seqs = compute_user_message_seqs(line_list, human_role_ids);
+pub(crate) fn build_game_line_inits(line_list: &[GameLine]) -> Vec<GameLineInit> {
+    let user_seqs = compute_user_message_seqs(line_list);
     let tts_seqs = super::chat::tts_seqs(line_list);
     line_list
         .iter()
@@ -501,11 +492,6 @@ pub(crate) async fn build_web_init_data(
         )
     };
 
-    // 玩家身份实体集合：回溯序号按"身份"判定（低频读取路径，允许查库）
-    let human_role_ids = RoleRepo::get_user_role_ids(&service.db)
-        .await
-        .map_err(|e| format!("查询玩家身份失败: {}", e))?;
-
     let (
         lines,
         current_scene_id,
@@ -518,7 +504,7 @@ pub(crate) async fn build_web_init_data(
         scene_awareness_enabled,
     ) = {
         let mut gs = service.game_status.lock().await;
-        let lines: Vec<GameLineInit> = build_game_line_inits(&gs.line_list, &human_role_ids);
+        let lines: Vec<GameLineInit> = build_game_line_inits(&gs.line_list);
 
         let mut sid = gs.current_scene_id.clone();
 

@@ -344,7 +344,7 @@ pub async fn rollback_conversation(
 
     // 转换为前端格式：玩家消息序号与 TTS 序号都由后端统一计算，
     // 回溯后的历史同样携带这两类序号，前端据此重建列表而无需自行计数
-    let init_lines = build_game_line_inits(&remaining, &human_role_ids);
+    let init_lines = build_game_line_inits(&remaining);
 
     tracing::info!(
         "回溯对话完成: message_seq={}, 剩余台词 {} 条",
