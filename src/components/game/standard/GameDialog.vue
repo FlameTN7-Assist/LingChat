@@ -169,6 +169,24 @@
         <!-- 分割线：青蓝色发光线条，亮段从左向右流动（同源桌宠外框 sweep-glow-ring） -->
         <div class="dialog-divider-glow my-1.5"></div>
 
+        <!-- 附身切换：简陋但可用，列出玩家身份与 AI 角色；美化留给后续迭代 -->
+        <div class="flex items-center gap-2 text-sm text-white/80">
+          <span class="shrink-0">当前扮演：</span>
+          <select
+            class="max-w-60 min-w-0 flex-1 rounded border border-white/20 bg-[rgba(0,14,39,0.6)] px-1 py-0.5 text-sm text-white outline-none"
+            :value="possessedRoleId"
+            @change="onPossessChange"
+          >
+            <option
+              v-for="opt in possessionOptions"
+              :key="`${opt.kind}-${opt.roleId}`"
+              :value="opt.roleId"
+            >
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
+
         <!-- 输入区 -->
         <div
           class="my-1.25 flex min-h-10 w-full resize-none flex-col border-none bg-transparent text-xl font-bold whitespace-pre-line text-white transition-all duration-300 outline-none"
@@ -241,6 +259,8 @@ import { createCharRevealWriter } from "../../../utils/typewriter/charReveal";
 import { TypeWriter } from "../../../utils/typewriter/TypeWriter";
 import { Button } from "../../base";
 import ScreenshotButton from "./ScreenshotButton.vue";
+import { characterGetAll } from "../../../api/services/character";
+import { listIdentities, possessEntity } from "../../../api/services/identity";
 
 const { t } = useI18n();
 const isShowingMotionText = ref(false);
@@ -268,6 +288,76 @@ watch(showMobileMenu, (open) => setMobileMenuOpen(open));
 
 // 当前游戏状态（模板 v-show 判定回复显示区 / 输入框）
 const currentStatus = computed(() => gameStore.currentStatus);
+
+// ===== 附身切换（最小可用接线）=====
+// 玩家身份来自统一实体接口；AI 角色取自现成的角色列表命令。
+interface PossessionOption {
+  roleId: number;
+  label: string;
+  kind: "identity" | "ai";
+}
+const possessionOptions = ref<PossessionOption[]>([]);
+const possessedRoleId = ref<number>(0);
+
+/** 拉取可选实体：玩家身份（含默认身份）+ AI 角色，并同步当前附身项 */
+async function loadPossessionOptions() {
+  try {
+    const identities = await listIdentities();
+    const options: PossessionOption[] = identities.map((item) => ({
+      roleId: item.role_id,
+      label: `身份：${item.name}`,
+      kind: "identity" as const,
+    }));
+    const current = identities.find((item) => item.possessed);
+    if (current) possessedRoleId.value = current.role_id;
+
+    try {
+      const page = await characterGetAll(1, 100);
+      for (const item of page.items) {
+        const roleId = Number(item.character_id);
+        if (!Number.isFinite(roleId)) continue;
+        options.push({ roleId, label: `角色：${item.title || item.name}`, kind: "ai" });
+      }
+    } catch (error) {
+      console.warn("[Possession] 加载 AI 角色列表失败:", error);
+    }
+    possessionOptions.value = options;
+  } catch (error) {
+    console.warn("[Possession] 加载附身列表失败:", error);
+  }
+}
+
+/** 切换附身实体；成功后同步本地玩家名显示 */
+async function onPossessChange(event: Event) {
+  const roleId = Number((event.target as HTMLSelectElement).value);
+  if (!Number.isFinite(roleId)) return;
+  try {
+    const name = await possessEntity(roleId);
+    possessedRoleId.value = roleId;
+    gameStore.userName = name;
+    uiStore.showNotification({
+      type: "success",
+      title: "附身切换成功",
+      message: `当前扮演：${name}`,
+      duration: 2000,
+      skipTipsCheck: true,
+    });
+  } catch (error) {
+    // 失败时回退到后端实际状态，避免下拉显示与后端口径不一致
+    try {
+      const current = (await listIdentities()).find((item) => item.possessed);
+      if (current) possessedRoleId.value = current.role_id;
+    } catch (fallbackError) {
+      console.warn("[Possession] 回退附身状态失败:", fallbackError);
+    }
+    uiStore.showNotification({
+      type: "warning",
+      title: "附身失败",
+      message: String(error),
+      skipTipsCheck: true,
+    });
+  }
+}
 
 // 标题栏（角色名 + 副标题）切换 key：任一变化时整体一起滑出/滑入
 const titleSubtitleKey = computed(
@@ -650,6 +740,9 @@ onMounted(async () => {
   window.addEventListener("resize", updateContainerWidth);
 
   initScreenshot();
+
+  // 附身切换列表（身份 + AI 角色）；失败只告警，不影响对话框其它功能
+  void loadPossessionOptions();
 });
 
 onUnmounted(() => {

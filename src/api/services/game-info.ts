@@ -36,7 +36,7 @@ export interface GameLineInit {
   action_content: string | null;
   audio_file: string | null;
   perceived_role_ids: number[];
-  /** 玩家消息序号（1-indexed），仅 sender_role_id == 0 的 user 行有值 */
+  /** 玩家消息序号（1-indexed），仅「玩家身份实体（role_type=User，含 id=0）」发出的 user 行有值 */
   user_message_seq: number | null;
   /** 该轮生成的思考链（仅每轮最后一条 assistant 行有值） */
   thinking: string | null;

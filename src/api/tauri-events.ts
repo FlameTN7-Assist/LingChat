@@ -423,6 +423,18 @@ export function initializeTauriEventListeners() {
     uiStore.showCharacterSubtitle = role.roleSubTitle;
   });
 
+  // === 附身事件（玩家侧行为，与 AI 侧角色切换 character:switch 分离）===
+
+  listen("identity:possessed", (event) => {
+    const payload = event.payload as { role_id: number; name: string };
+    console.log("[Tauri] identity:possessed", payload);
+    const gameStore = useGameStore();
+    // 玩家名真相源已在后端搬进实体行，这里只同步前端展示缓存
+    if (payload?.name) {
+      gameStore.userName = payload.name;
+    }
+  });
+
   // === LLM 场景工具事件 ===
 
   listen("scene:switch", (event) => {
