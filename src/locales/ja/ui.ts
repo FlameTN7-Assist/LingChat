@@ -48,6 +48,11 @@ export default {
     possessing: "憑依中",
     possessDisabledScript: "シナリオ／試遊の進行中は憑依できません",
     possessDisabledCurrent: "会話中のキャラクターには憑依できません",
+    possessDisabledOffstage: "このキャラクターは登場していません。先に登場させてから憑依してください",
+    possessedBadge: "扮演中",
+    selectDisabledPossessed: "このキャラクターを演じているため、先に演じる身分を切り替えてください",
+    leaveDisabledPossessed: "このキャラクターを演じているため、退出できません",
+    joinSceneFailed: "シーンへの参加に失敗しました",
     confirmSwitch:
       "キャラクターを切り替えると、現在のキャラクターの記憶はクリアされます。必要な場合は忘れずにセーブしてくださいね",
   },

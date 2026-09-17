@@ -107,8 +107,14 @@
         <button
           v-else-if="!isSelected()"
           @click="leaveScene"
-          class="rounded-full border border-red-400 bg-red-500/80 px-4 py-1.5 text-xs font-semibold
-            text-white shadow-lg shadow-red-500/20 transition-all hover:bg-red-500"
+          :disabled="leaveDisabled"
+          :title="leaveDisabled ? leaveDisabledTitle : undefined"
+          :class="[
+            'rounded-full border px-4 py-1.5 text-xs font-semibold transition-all',
+            leaveDisabled
+              ? 'cursor-not-allowed border-white/10 bg-white/5 text-white/30'
+              : 'border-red-400 bg-red-500/80 text-white shadow-lg shadow-red-500/20 hover:bg-red-500',
+          ]"
         >
           {{ $t("ui.characterCard.leave") }}
         </button>
@@ -122,12 +128,16 @@
         </button>
         <button
           @click="selectCharacter"
+          :disabled="selectDisabled"
+          :title="selectDisabled ? selectDisabledTitle : undefined"
           :class="[
             'rounded-full border px-5 py-1.5 text-xs font-bold shadow-lg transition-all',
-            isSelected()
-              ? 'border-emerald-400 bg-emerald-500/80 text-white shadow-emerald-500/20'
-              : `border-indigo-500 bg-indigo-600/80 text-white shadow-indigo-500/20
-                hover:bg-indigo-500`,
+            selectDisabled
+              ? 'cursor-not-allowed border-white/10 bg-white/5 text-white/30'
+              : isSelected()
+                ? 'border-emerald-400 bg-emerald-500/80 text-white shadow-emerald-500/20'
+                : `border-indigo-500 bg-indigo-600/80 text-white shadow-indigo-500/20
+                  hover:bg-indigo-500`,
           ]"
         >
           {{ isSelected() ? $t("ui.characterCard.selected") : $t("ui.characterCard.select") }}
@@ -288,6 +298,10 @@
     showPossess?: boolean;
     /** 非空字符串表示禁用附身并作为悬浮提示（剧本进行中 / 不可接管的当前对话对象） */
     possessDisabledReason?: string;
+    /** 非空字符串表示禁用「选择」并作为悬浮提示（例如该角色正被玩家扮演） */
+    selectDisabledReason?: string;
+    /** 非空字符串表示禁用「退场」并作为悬浮提示（例如该角色正被玩家扮演） */
+    leaveDisabledReason?: string;
   }
 
   const props = withDefaults(defineProps<CharacterProps>(), {
@@ -298,6 +312,8 @@
     resourceFolder: "",
     showPossess: false,
     possessDisabledReason: "",
+    selectDisabledReason: "",
+    leaveDisabledReason: "",
   });
 
   const emit = defineEmits(["saved"]);
@@ -324,6 +340,22 @@
   const possessDisabled = computed(
     () => !!props.possessDisabledReason || isPossessed() || possessing.value
   );
+
+  /**
+   * 「选择」「退场」的置灰文案：外部传入优先，未传时按附身态兜底。
+   * 附身期间切换主角色会让当前扮演身份失配，故卡片自身也兜底禁用，不依赖调用方记得传值。
+   */
+  const selectDisabledTitle = computed(() =>
+    props.selectDisabledReason ||
+    (isPossessed() ? t("ui.characterCard.selectDisabledPossessed") : "")
+  );
+  const selectDisabled = computed(() => !!selectDisabledTitle.value);
+
+  const leaveDisabledTitle = computed(() =>
+    props.leaveDisabledReason ||
+    (isPossessed() ? t("ui.characterCard.leaveDisabledPossessed") : "")
+  );
+  const leaveDisabled = computed(() => !!leaveDisabledTitle.value);
 
   /** 附身该 AI 角色；成功/失败走既有全局通知 */
   const possess = async () => {
@@ -357,6 +389,7 @@
   const closeDetailModal = () => (isDetailVisible.value = false);
 
   const selectCharacter = async () => {
+    if (selectDisabled.value) return;
     const confirmed = await dialogStore.confirm(t("ui.characterCard.confirmSwitch"));
     if (!confirmed) return;
 
@@ -400,10 +433,22 @@
         gameStore.presentRoleIds.push(props.id);
         // 确保角色信息已加载
         await gameStore.getOrCreateGameRole(props.id);
+        return;
       }
-      console.log("[CharacterCard] 角色加入场景:", result.message);
+      // 后端拒绝（如已达场景人数上限）时经全局通知告知，避免只留控制台日志
+      uiStore.showNotification({
+        type: "warning",
+        title: t("ui.characterCard.joinSceneFailed"),
+        message: result.message,
+        skipTipsCheck: true,
+      });
     } catch (error) {
-      console.error("[CharacterCard] 角色加入场景失败:", error);
+      uiStore.showNotification({
+        type: "warning",
+        title: t("ui.characterCard.joinSceneFailed"),
+        message: String(error),
+        skipTipsCheck: true,
+      });
     }
   };
 

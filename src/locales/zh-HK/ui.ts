@@ -49,6 +49,11 @@ export default {
     possessing: "扮演緊",
     possessDisabledScript: "劇本／試玩進行中唔可以附身",
     possessDisabledCurrent: "唔可以附身緊對話嘅角色",
+    possessDisabledOffstage: "呢個角色唔喺場，請先安排佢入場再扮演",
+    possessedBadge: "扮演中",
+    selectDisabledPossessed: "呢個角色而家由你扮演，請先切換扮演身份",
+    leaveDisabledPossessed: "呢個角色而家由你扮演，唔可以退場",
+    joinSceneFailed: "加入場景失敗",
     confirmSwitch: "轉角色會令而家呢個角色嘅記憶清空，有需要嘅話記住存檔喎",
   },
   archiveProgress: {

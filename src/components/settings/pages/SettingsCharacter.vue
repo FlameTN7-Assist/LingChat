@@ -23,6 +23,8 @@
           :source="character.source"
           show-possess
           :possess-disabled-reason="possessBlockedReason(character.id)"
+          :select-disabled-reason="selectDisabledReason(character.id)"
+          :leave-disabled-reason="leaveDisabledReason(character.id)"
           @saved="handleSettingsSaved"
         />
       </div>
@@ -278,11 +280,24 @@
    */
   const possessBlockedReason = (id: number): string => {
     if (isScriptRunning.value) return t("ui.characterCard.possessDisabledScript");
+    // AI 角色必须先入场才能接管话筒；玩家身份（userRoleIds）不参与在场判定
+    if (!userRoleIds.value.has(id) && !gameStore.presentRoleIds.includes(id)) {
+      return t("ui.characterCard.possessDisabledOffstage");
+    }
     if (gameStore.currentInteractRoleId === id && !hasHandoffCandidate(id)) {
       return t("ui.characterCard.possessDisabledCurrent");
     }
     return "";
   };
+
+  /** 角色正被玩家扮演：此时「选择」与「退场」都会让扮演身份失配，提前置灰 */
+  const isPossessed = (id: number): boolean => gameStore.possessedRoleId === id;
+
+  const selectDisabledReason = (id: number): string =>
+    isPossessed(id) ? t("ui.characterCard.selectDisabledPossessed") : "";
+
+  const leaveDisabledReason = (id: number): string =>
+    isPossessed(id) ? t("ui.characterCard.leaveDisabledPossessed") : "";
 
   onMounted(() => {
     loadCharacters();

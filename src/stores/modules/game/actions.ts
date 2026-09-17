@@ -199,6 +199,8 @@ export function applyWebInitData(state: GameState, gameInfo: WebInitData): void 
     gameInfo.onstage_roles_ids.length > 0 ? [...gameInfo.onstage_roles_ids] : [charId];
   state.mainRoleId = charId;
   state.currentInteractRoleId = gameInfo.current_interact_role_id ?? charId;
+  // 会话清空/重开：展示态快照一并复位，避免上一场残留的说话人影响新会话首句
+  state.displaySpeakerRoleId = null;
 
   const uiStore = useUIStore();
   const settingsStore = useSettingsStore();

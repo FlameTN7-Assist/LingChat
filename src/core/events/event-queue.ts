@@ -42,6 +42,9 @@ export class EventQueue {
       const settings = useSettingsStore();
       const gameStore = useGameStore();
       const uiStore = useUIStore();
+      // 合并对象必须是「正在展示的那句台词」的发送者：character:switch 旁路会提前改写
+      // currentInteractRoleId，用它判定会把异角色回复错并进当前气泡。
+      const displaySpeakerRoleId = gameStore.displaySpeakerRoleId;
       const stillShowing = uiStore.autoMode
         ? this.getState().isWaitingForUser
         : dialogueMerge.isTyping || dialogueMerge.isAudioPlaying;
@@ -49,12 +52,13 @@ export class EventQueue {
         settings.text.inlineMotionText &&
         settings.text.mergeLineThreshold > 0 &&
         stillShowing &&
-        event.roleId === gameStore.currentInteractRoleId &&
+        event.roleId === displaySpeakerRoleId &&
         dialogueMerge.mergedLength + event.message.length <= settings.text.mergeLineThreshold &&
         !this.queue.some((e) => e.type !== "thinking")
       ) {
         // console.log("初始台词 第二句 融合允许");
         dialogueMerge.armed = true;
+        // 由上面的守卫可知 event.roleId 即 displaySpeakerRoleId，且此处必非 null
         dialogueMerge.armedRoleId = event.roleId;
       }
     }

@@ -49,6 +49,11 @@ export default {
     possessing: "Possessing",
     possessDisabledScript: "Cannot possess while a script or preview is running",
     possessDisabledCurrent: "Cannot possess the character you are talking to",
+    possessDisabledOffstage: "This character is not on stage — bring them on stage first",
+    possessedBadge: "Playing",
+    selectDisabledPossessed: "You are playing this character — switch your possessed identity first",
+    leaveDisabledPossessed: "You are playing this character and cannot leave the stage",
+    joinSceneFailed: "Failed to join the scene",
     confirmSwitch:
       "Switching characters will clear the current character's memory — don't forget to save first if you need it!",
   },
