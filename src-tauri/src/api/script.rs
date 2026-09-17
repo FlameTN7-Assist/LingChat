@@ -108,6 +108,11 @@ pub async fn start_script(app: AppHandle, script_name: String) -> Result<(), Str
         }
         let config = service.config.clone();
         let is_running = service.script_manager.is_running.clone();
+        // 同一时刻只允许一个剧本/冒险占用引擎：重复启动会让两个 run 争抢同一份
+        // script_status 与输入通道，前端也收不到明确的结束信号
+        if is_running.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err("已有剧本或冒险正在进行中".to_string());
+        }
         (script, game_status, config, is_running)
     };
 

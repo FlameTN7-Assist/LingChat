@@ -19,7 +19,9 @@ use crate::ai_service::game_system::script_engine::responses::{
     ScriptEndPayload, event_names::SCRIPT_END,
 };
 use crate::ai_service::message_system::events::emit;
-use crate::ai_service::types::{AdventureConfig, LineAttributeExt, LineBase, ScriptStatus};
+use crate::ai_service::types::{
+    AdventureConfig, LineAttributeExt, LineBase, PLAYER_ROLE_ID, ScriptStatus,
+};
 use crate::db::entities::line::LineAttribute;
 use crate::db::entities::role::RoleType;
 use crate::db::managers::role_repo::RoleRepo;
@@ -244,6 +246,19 @@ impl ScriptManager {
         ctx: &mut ScriptContext<'_>,
         is_running: &AtomicBool,
     ) -> Result<()> {
+        // 附身态禁止启动剧本：这里是 API 层之外的兜底，防止未来新增的调用点绕过
+        // 命令层校验直接进引擎。校验必须在 is_running 翻转之前，早退时不触发收尾。
+        let possessed = {
+            let gs = ctx.game_status.lock().await;
+            gs.possessed_role_id
+        };
+        if possessed != PLAYER_ROLE_ID {
+            // 早退路径不经过 on_script_end，必须自己补发结束事件：此时前端已进入剧本
+            // 界面，没有 script:end 就永远等不到退出信号，会卡在假剧本模式。
+            let _ = emit(ctx.app, SCRIPT_END, &ScriptEndPayload { completed: false });
+            return Err(anyhow!("请先解除扮演（切回默认身份）后再开始剧本"));
+        }
+
         is_running.store(true, Ordering::SeqCst);
         Self::run_to_completion(script, ctx, is_running).await
     }

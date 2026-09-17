@@ -18,6 +18,7 @@ use crate::AppState;
 use crate::ai_service::game_system::game_status::GameStatus;
 use crate::ai_service::types::{PLAYER_ROLE_ID, ScriptStatus};
 use crate::api::{data_dir, game_data_dir};
+use crate::api::identity::{emit_possessed, PossessedInfo};
 use crate::db::managers::role_repo::RoleRepo;
 
 use sea_orm::DatabaseConnection;
@@ -1445,7 +1446,7 @@ pub async fn editor_start_preview(
     }
 
     // 备份整个会话状态，并按「刚进游戏」的样子把试玩场次搭好
-    let session = PreviewSession::begin(&db, &data_dir, &game_status, &script).await?;
+    let session = PreviewSession::begin(&app, &db, &data_dir, &game_status, &script).await?;
     // 提前取出本轮代号返回给前端（session 随后整体移入 AppState 托管）
     let generation = session.generation;
 
@@ -1539,6 +1540,7 @@ pub struct PreviewSession {
 
 impl PreviewSession {
     async fn begin(
+        app: &AppHandle,
         db: &DatabaseConnection,
         data_dir: &Path,
         game_status: &Arc<Mutex<GameStatus>>,
@@ -1570,6 +1572,14 @@ impl PreviewSession {
         if let Err(e) = gs.refresh_possessed_cache(db).await {
             tracing::warn!("[ScriptEditor] 试玩前重置附身态失败: {}", e);
         }
+        // 附身从非默认身份切回默认时必须广播：不广播前端 possessedRoleId 会与后端
+        // 分叉，试玩期间身份徽标与玩家名显示错位。信息在刷新缓存后取好，等 gs 锁
+        // 释放后再发（emit 不放在持锁链上）。
+        let reset_info = (saved.possessed_role_id != PLAYER_ROLE_ID).then(|| PossessedInfo {
+            role_id: gs.possessed_role_id,
+            name: gs.player.user_name.clone(),
+            subtitle: gs.player.user_subtitle.clone(),
+        });
 
         // ---- 按「刚进游戏」的样子搭场次，对齐 init_game_status 的三件事 ----
         // 失败时把已拍快照套回去再报错：否则试玩启动失败也会把自由对话的
@@ -1581,6 +1591,12 @@ impl PreviewSession {
             gs.main_role_id = saved.main_role_id;
             gs.current_role_id = saved.current_role_id;
             gs.script_status = saved.script_status.map(|b| *b);
+            // 该早退不广播（前端从未收到过重置广播），但必须把附身态静默还原回
+            // saved 值并刷新玩家缓存，否则共享会话会残留 role_id=0 的分叉态。
+            gs.possessed_role_id = saved.possessed_role_id;
+            if let Err(e) = gs.refresh_possessed_cache(db).await {
+                tracing::warn!("[ScriptEditor] 试玩启动失败后还原附身态失败: {}", e);
+            }
             gs.player.user_name = saved.user_name.clone();
             gs.player.user_subtitle = saved.user_subtitle.clone();
             return Err(format!("载入主角失败: {}", e));
@@ -1604,6 +1620,9 @@ impl PreviewSession {
         // 人设 SYSTEM 台词。缺了它 role_manager 会警告「人设丢失」，
         // 而且 AI 对话会在没有人设的上下文里生成。
         drop(gs);
+        if let Some(info) = reset_info {
+            emit_possessed(app, &info);
+        }
         if let Some(prompt) = build_main_role_prompt(db, data_dir, main_id, &player_name).await {
             let line = crate::ai_service::types::LineBase {
                 content: prompt.text,
@@ -1630,7 +1649,13 @@ impl PreviewSession {
 
     /// 尽力还原，任何一步失败都只记日志 —— 收尾阶段再抛错没有接收方，
     /// 而且半途放弃只会让残留更多。
-    async fn restore(self, db: &DatabaseConnection, game_status: &Arc<Mutex<GameStatus>>) {
+    async fn restore(
+        self,
+        app: &AppHandle,
+        db: &DatabaseConnection,
+        game_status: &Arc<Mutex<GameStatus>>,
+    ) {
+        let was_possessed = self.possessed_role_id != PLAYER_ROLE_ID;
         let mut gs = game_status.lock().await;
         // 递增试玩代号：让上一场被中止后仍在排空的游离流式任务捕获的旧代号
         // 立即过期，它们的迟到写入会被 add_assistant_line 的守卫丢弃，不再
@@ -1650,9 +1675,20 @@ impl PreviewSession {
         }
         gs.player.user_name = self.user_name;
         gs.player.user_subtitle = self.user_subtitle;
+        // 附身恢复为非默认身份时同样要广播，否则前端 possessedRoleId 会与后端分叉。
+        // 信息在还原并刷新缓存后取好，等 gs 锁释放后再发（emit 不放在持锁链上）。
+        let restored_info = was_possessed.then(|| PossessedInfo {
+            role_id: gs.possessed_role_id,
+            name: gs.player.user_name.clone(),
+            subtitle: gs.player.user_subtitle.clone(),
+        });
         // 台词表变短了，角色记忆要按新的列表重建，否则里面还留着试玩的内容
         if let Err(e) = gs.refresh_memories(db).await {
             tracing::warn!("[ScriptEditor] 还原后刷新记忆失败: {}", e);
+        }
+        drop(gs);
+        if let Some(info) = restored_info {
+            emit_possessed(app, &info);
         }
     }
 }
@@ -1675,7 +1711,7 @@ async fn apply_pending_restore(app: &AppHandle) {
     let state = app.state::<AppState>();
     let db = state.db.clone();
     let game_status = state.ai_service.lock().await.game_status.clone();
-    session.restore(&db, &game_status).await;
+    session.restore(app, &db, &game_status).await;
 }
 
 /// 试玩时 `MAIN` 应该解析成谁。

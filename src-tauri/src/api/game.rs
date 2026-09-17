@@ -337,6 +337,11 @@ pub async fn select_character(app: AppHandle, character_id: i32) -> Result<WebIn
         if gs.is_possessed(character_id) {
             return Err("该角色正被你扮演，请先切换扮演身份".to_string());
         }
+        // 剧本/试玩运行中切换对话对象会打乱引擎持有的当前角色绑定，必须在
+        // 任何状态突变之前拦住（试玩结束还会整体还原会话，改了也会被冲掉）
+        if gs.script_status.is_some() {
+            return Err("剧本/试玩进行中，无法切换对话对象".to_string());
+        }
         gs.possessed_role_id
     };
 
