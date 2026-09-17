@@ -293,8 +293,11 @@
   /** 角色正被玩家扮演：此时「选择」与「退场」都会让扮演身份失配，提前置灰 */
   const isPossessed = (id: number): boolean => gameStore.possessedRoleId === id;
 
-  const selectDisabledReason = (id: number): string =>
-    isPossessed(id) ? t("ui.characterCard.selectDisabledPossessed") : "";
+  const selectDisabledReason = (id: number): string => {
+    // 剧本/试玩进行中切换对话对象会打断引擎流程，优先于附身判定置灰
+    if (isScriptRunning.value) return t("ui.characterCard.selectDisabledScript");
+    return isPossessed(id) ? t("ui.characterCard.selectDisabledPossessed") : "";
+  };
 
   const leaveDisabledReason = (id: number): string =>
     isPossessed(id) ? t("ui.characterCard.leaveDisabledPossessed") : "";

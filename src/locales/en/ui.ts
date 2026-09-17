@@ -52,6 +52,10 @@ export default {
     possessDisabledOffstage: "This character is not on stage — bring them on stage first",
     possessedBadge: "Playing",
     selectDisabledPossessed: "You are playing this character — switch your possessed identity first",
+    selectDisabledScript: "Cannot switch the conversation target during a script/preview",
+    scriptStartDisabledPossessed:
+      "Cannot start a script/adventure while possessing a character. Release possession first.",
+    startFailedTitle: "Cannot Start",
     leaveDisabledPossessed: "You are playing this character and cannot leave the stage",
     joinSceneFailed: "Failed to join the scene",
     confirmSwitch:

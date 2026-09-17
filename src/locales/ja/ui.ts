@@ -51,6 +51,10 @@ export default {
     possessDisabledOffstage: "このキャラクターは登場していません。先に登場させてから憑依してください",
     possessedBadge: "扮演中",
     selectDisabledPossessed: "このキャラクターを演じているため、先に演じる身分を切り替えてください",
+    selectDisabledScript: "シナリオ/プレビュー中は会話相手を選択できません",
+    scriptStartDisabledPossessed:
+      "憑依中はシナリオ/アドベンチャーを開始できません。先に憑依を解除してください",
+    startFailedTitle: "開始できません",
     leaveDisabledPossessed: "このキャラクターを演じているため、退出できません",
     joinSceneFailed: "シーンへの参加に失敗しました",
     confirmSwitch:
