@@ -15,6 +15,7 @@ use crate::ai_service::message_system::generator::{
 use crate::ai_service::types::{
     CharacterSettings, GameLine, LineAttributeExt, LineBase, Live2dSettings, PLAYER_ROLE_ID,
 };
+use crate::api::identity::{emit_possessed, PossessedInfo};
 use crate::config::{self, AppConfig};
 use crate::db::entities::line;
 use crate::db::entities::line::LineAttribute;
@@ -329,6 +330,17 @@ pub async fn select_character(app: AppHandle, character_id: i32) -> Result<WebIn
     // 1. 从 DB 加载角色设定
     let state = app.state::<AppState>();
 
+    // 被附身的角色不能作为常规对话对象：玩家身份与对话对象重合会形成
+    // "自己跟自己说话"的死锁。此处在 init_game_status 的加锁区间之外单独读一次。
+    let previously_possessed = {
+        let service = state.ai_service.lock().await;
+        let gs = service.game_status.lock().await;
+        if gs.is_possessed(character_id) {
+            return Err("该角色正被你扮演，请先切换扮演身份".to_string());
+        }
+        gs.possessed_role_id
+    };
+
     // 2. 读取 AppConfig 构建 PromptOptions
     let app_config = AppConfig::load(&app).unwrap_or_default();
     let prompt_options = PromptOptions {
@@ -358,10 +370,29 @@ pub async fn select_character(app: AppHandle, character_id: i32) -> Result<WebIn
 
     // 5. 返回最新游戏状态（复用 init_game 逻辑）
     //    drop 后再拿锁，避免同一个锁两次借用
-    let init = {
+    let (init, fallback_info) = {
         let service = state.ai_service.lock().await;
-        build_web_init_data(&service, &app).await?
+        // 清档会把附身归零（见 init_game_status）；先按新会话态取好默认身份信息。
+        // gs 锁必须在 build_web_init_data 前释放，后者会再次加锁。
+        let fallback_info = {
+            let gs = service.game_status.lock().await;
+            if previously_possessed != PLAYER_ROLE_ID {
+                Some(PossessedInfo {
+                    role_id: gs.possessed_role_id,
+                    name: gs.player.user_name.clone(),
+                    subtitle: gs.player.user_subtitle.clone(),
+                })
+            } else {
+                None
+            }
+        };
+        let init = build_web_init_data(&service, &app).await?;
+        (init, fallback_info)
     };
+    // 先前处于附身态时，清档已把它归零；补发一次默认身份广播让前端徽标同步
+    if let Some(info) = fallback_info {
+        emit_possessed(&app, &info);
+    }
     Ok(init)
 }
 
@@ -394,22 +425,22 @@ pub async fn clear_conversation(app: AppHandle) -> Result<WebInitData, String> {
 
 /// 为台词列表计算玩家消息序号（1-indexed）。
 ///
-/// 玩家消息 = `sender` 属于玩家身份实体集合（`role_type=User`，含 id=0）且
-/// `attribute == User`。被附身的 AI 角色其发言 sender 是 AI 实体，不在该集合内——
-/// 它在本行语义上是 assistant，不作为回溯定位点。
+/// 判定以行为为准：`attribute == User` 且有明确发送者即算玩家发言。被附身 AI
+/// 实体替玩家发出的台词 sender 虽是 AI 实体，attribute 仍是 User，若再按 sender
+/// 是否属于玩家身份集合过滤会漏掉这些真实的玩家发言；sender 为空的系统旁白
+/// （如入场/退场提示）不计入。`human_role_ids` 已不参与判定，保留参数以免
+/// 调用方签名变动。
 pub fn compute_user_message_seqs(
     line_list: &[GameLine],
-    human_role_ids: &HashSet<i32>,
+    _human_role_ids: &HashSet<i32>,
 ) -> Vec<Option<u32>> {
     let mut count = 0u32;
     line_list
         .iter()
         .map(|gl| {
-            let is_human = gl
-                .base
-                .sender_role_id
-                .is_some_and(|id| human_role_ids.contains(&id));
-            if is_human && matches!(gl.attribute(), LineAttribute::User) {
+            if gl.base.sender_role_id.is_some()
+                && matches!(gl.attribute(), LineAttribute::User)
+            {
                 count += 1;
                 Some(count)
             } else {
@@ -655,8 +686,9 @@ pub async fn add_role_to_scene(app: AppHandle, role_id: i32) -> Result<JsonValue
             return Err("剧本模式下无法手动添加角色到场景".to_string());
         }
 
-        // 已在场
-        if gs.present_role_ids.contains(&role_id) {
+        // 已在场（以舞台集合为准）：present 可能因附身等边缘路径多出一个实体，
+        // 只查 present 会把这类残留当成"已入场"而挡住正常入场。
+        if gs.onstage_role_ids.contains(&role_id) {
             return Ok(serde_json::json!({"success": false, "message": "角色已在场景中"}));
         }
 
@@ -758,6 +790,11 @@ pub async fn remove_role_from_scene(app: AppHandle, role_id: i32) -> Result<Json
         // 主角不可退场
         if gs.main_role_id == Some(role_id) {
             return Err("无法移除主角".to_string());
+        }
+
+        // 被附身角色正被玩家扮演，退场会让玩家身份失去承载实体
+        if gs.is_possessed(role_id) {
+            return Err("该角色正被你扮演，请先解除扮演".to_string());
         }
 
         // 不在场

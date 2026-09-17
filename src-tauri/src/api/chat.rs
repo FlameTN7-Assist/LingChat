@@ -16,7 +16,6 @@ use crate::ai_service::types::{GameLine, LineAttributeExt, LineBase};
 use crate::api::game::{GameLineInit, build_game_line_inits};
 use crate::config::AppConfig;
 use crate::db::entities::line::LineAttribute;
-use crate::db::managers::role_repo::RoleRepo;
 use crate::db::managers::save_repo::SaveRepo;
 use crate::utils::prompt::PromptRole;
 
@@ -289,9 +288,9 @@ async fn handle_debug_command(app: &AppHandle, text: &str) -> Result<(), String>
 
 /// 回溯对话：将台词列表截断到指定玩家消息之前（移除该消息及之后所有内容）。
 ///
-/// `message_seq` 为 1-indexed 的玩家消息序号。玩家消息 = sender 属于玩家身份
-/// 实体（`role_type=User`，含默认身份 0）且 attribute == User；被附身的 AI 角色
-/// 其发言不算玩家消息，不可作为回溯定位点。
+/// `message_seq` 为 1-indexed 的玩家消息序号。玩家消息 = `attribute == User` 且
+/// 有明确发送者（附身期间由 AI 实体代发的玩家台词也算）；sender 为空的系统
+/// 旁白不计入。判定与 compute_user_message_seqs 同源，保证序号定义一致。
 #[tauri::command]
 pub async fn rollback_conversation(
     app: AppHandle,
@@ -299,11 +298,6 @@ pub async fn rollback_conversation(
 ) -> Result<Vec<GameLineInit>, String> {
     let state = app.state::<AppState>();
     let db = state.db.clone();
-
-    // 身份集合与 build_game_line_inits 同源，保证序号定义一致
-    let human_role_ids = RoleRepo::get_user_role_ids(&db)
-        .await
-        .map_err(|e| format!("查询玩家身份失败: {}", e))?;
 
     // 串行化：等待正在进行的消息生成完成再截断
     let gen_lock = state.generation_lock.clone();
@@ -313,17 +307,16 @@ pub async fn rollback_conversation(
         let svc = state.ai_service.lock().await;
         let mut gs = svc.game_status.lock().await;
 
-        // 按序号定位第 N 条玩家消息（1-indexed）
+        // 按序号定位第 N 条玩家消息（1-indexed）：attribute==User 且有明确发送者，
+        // 排除入场提示等 sender 为空的系统旁白
         let mut count = 0u32;
         let idx = gs
             .line_list
             .iter()
             .position(|line| {
-                let is_human = line
-                    .base
-                    .sender_role_id
-                    .is_some_and(|id| human_role_ids.contains(&id));
-                if is_human && matches!(line.attribute(), LineAttribute::User) {
+                if line.base.sender_role_id.is_some()
+                    && matches!(line.attribute(), LineAttribute::User)
+                {
                     count += 1;
                     count == message_seq
                 } else {

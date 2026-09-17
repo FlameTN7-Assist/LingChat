@@ -13,6 +13,7 @@ use crate::adventures::manager::AdventureManager;
 use crate::adventures::trigger::{self, UnlockedAdventureInfo};
 use crate::ai_service::game_system::script_engine::ScriptManager;
 use crate::ai_service::game_system::script_engine::events::ScriptContext;
+use crate::ai_service::types::PLAYER_ROLE_ID;
 
 // ============================================================
 // Response types
@@ -190,6 +191,13 @@ pub async fn start_adventure(app: AppHandle, adventure_folder: String) -> Result
             .ok_or_else(|| format!("冒险不存在: '{}'", adventure_folder))?
             .clone();
         let game_status = service.game_status.clone();
+        // 带附身启动冒险会让玩家身份与冒险场次互相污染，先要求解除扮演
+        {
+            let gs = game_status.lock().await;
+            if gs.possessed_role_id != PLAYER_ROLE_ID {
+                return Err("请先解除扮演（切回默认身份）后再开始冒险".to_string());
+            }
+        }
         let config = service.config.clone();
         let is_running = service.script_manager.is_running.clone();
         (script, game_status, config, is_running)

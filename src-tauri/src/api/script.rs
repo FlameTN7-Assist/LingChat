@@ -6,6 +6,7 @@
 use crate::AppState;
 use crate::ai_service::game_system::script_engine::ScriptManager;
 use crate::ai_service::game_system::script_engine::events::ScriptContext;
+use crate::ai_service::types::PLAYER_ROLE_ID;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
@@ -98,6 +99,13 @@ pub async fn start_script(app: AppHandle, script_name: String) -> Result<(), Str
             .ok_or_else(|| format!("剧本不存在: '{}'", script_name))?
             .clone();
         let game_status = service.game_status.clone();
+        // 带附身启动剧本会让玩家身份与剧本场次互相污染，先要求解除扮演
+        {
+            let gs = game_status.lock().await;
+            if gs.possessed_role_id != PLAYER_ROLE_ID {
+                return Err("请先解除扮演（切回默认身份）后再开始剧本".to_string());
+            }
+        }
         let config = service.config.clone();
         let is_running = service.script_manager.is_running.clone();
         (script, game_status, config, is_running)

@@ -52,9 +52,22 @@ async fn current_possessed(app: &AppHandle) -> i32 {
 }
 
 /// 广播当前扮演者变化。负载复用 `PossessedInfo`，与 `get_possessed_entity` 保持同构。
-fn emit_possessed(app: &AppHandle, info: &PossessedInfo) {
+pub(crate) fn emit_possessed(app: &AppHandle, info: &PossessedInfo) {
     if let Err(e) = app.emit("identity:possessed", info) {
         tracing::warn!("emit identity:possessed 失败: {e}");
+    }
+}
+
+/// 广播当前说话角色切换。负载字段与 `message_system` 的 `character:switch` 逐字段对齐，
+/// 前端两处消费者按同一形状解析。
+fn emit_character_switch(app: &AppHandle, role_id: i32, name: &str) {
+    let payload = serde_json::json!({
+        "type": "character_switch",
+        "roleId": role_id,
+        "characterName": name,
+    });
+    if let Err(e) = app.emit("character:switch", &payload) {
+        tracing::warn!("emit character:switch 失败: {e}");
     }
 }
 
@@ -213,20 +226,41 @@ pub async fn delete_identity(app: AppHandle, role_id: i32) -> Result<bool, Strin
 pub async fn possess_entity(app: AppHandle, role_id: i32) -> Result<String, String> {
     let state = app.state::<AppState>();
     let options = prompt_options(&app);
-    let info = {
+    let (info, handoff) = {
         let service = state.ai_service.lock().await;
         let mut gs = service.game_status.lock().await;
-        possession::possess_entity(&mut gs, &state.db, role_id, options)
+        let outcome = possession::possess_entity(&mut gs, &state.db, role_id, options)
             .await
             .map_err(|e| format!("附身失败: {}", e))?;
-        PossessedInfo {
-            role_id: gs.possessed_role_id,
-            name: gs.player.user_name.clone(),
-            subtitle: gs.player.user_subtitle.clone(),
-        }
+        // 移交话筒后前端需要同步当前对话对象，在锁内取好名字再于锁外广播
+        let handoff = match outcome.handoff_role_id {
+            Some(target_id) => {
+                let name = gs
+                    .get_role(&state.db, target_id)
+                    .await
+                    .map_err(|e| format!("读取移交角色失败: {}", e))?
+                    .display_name
+                    .clone()
+                    .unwrap_or_default();
+                Some((target_id, name))
+            }
+            None => None,
+        };
+        (
+            PossessedInfo {
+                role_id: gs.possessed_role_id,
+                name: outcome.display_name.clone(),
+                subtitle: gs.player.user_subtitle.clone(),
+            },
+            handoff,
+        )
     };
 
     emit_possessed(&app, &info);
+    // 附身当前对话对象会触发话筒移交，补发与 God Agent 同形的切换事件
+    if let Some((target_id, target_name)) = handoff {
+        emit_character_switch(&app, target_id, &target_name);
+    }
     Ok(info.name)
 }
 

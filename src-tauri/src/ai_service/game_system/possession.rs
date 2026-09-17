@@ -9,10 +9,20 @@ use anyhow::{anyhow, Result};
 use sea_orm::DatabaseConnection;
 
 use crate::ai_service::game_system::game_status::GameStatus;
+use crate::ai_service::types::PLAYER_ROLE_ID;
+use crate::db::entities::role::RoleType;
 use crate::db::managers::role_repo::RoleRepo;
 use crate::utils::prompt::PromptOptions;
 
-/// 把玩家附身到指定实体上，返回该实体的显示名。
+/// 附身执行结果：命令层据此决定是否需要补发前端事件。
+pub struct PossessOutcome {
+    /// 该实体在玩家视角下的显示名（即附身后的玩家名）。
+    pub display_name: String,
+    /// 若因附身当前对话对象而移交了话筒，这里是被移交到的在场 AI 实体 id。
+    pub handoff_role_id: Option<i32>,
+}
+
+/// 把玩家附身到指定实体上，返回该实体的显示名与话筒移交结果。
 ///
 /// 附身后：
 /// 1. 实体必须"在场"（否则感知不到台词，God Agent 也看不见它）；
@@ -24,14 +34,24 @@ pub async fn possess_entity(
     db: &DatabaseConnection,
     role_id: i32,
     prompt_options: PromptOptions,
-) -> Result<String> {
-    RoleRepo::get_role_by_id(db, role_id)
+) -> Result<PossessOutcome> {
+    let role = RoleRepo::get_role_by_id(db, role_id)
         .await?
         .ok_or_else(|| anyhow!("实体不存在: role_id={}", role_id))?;
 
     // ── 校验阶段：所有拒绝都在任何状态修改之前返回 ──
     if gs.script_status.is_some() {
         return Err(anyhow!("剧本/试玩进行中，无法切换扮演"));
+    }
+
+    // AI 角色必须有立绘在舞台上：附身一个不在场的角色，玩家会以一个"看不见的人"
+    // 的身份说话，该角色也感知不到台词、God Agent 看不见它。默认身份与 User 身份
+    // 没有立绘、本就不属舞台，故不受此限。
+    if role.role_type != RoleType::User
+        && role_id != PLAYER_ROLE_ID
+        && !gs.onstage_role_ids.contains(&role_id)
+    {
+        return Err(anyhow!("该角色不在场，请先让其入场后再扮演"));
     }
 
     // 玩家身份集合与 God Agent 判据同源（role_repo）。校验阶段只读不入缓存，
@@ -64,7 +84,8 @@ pub async fn possess_entity(
     // 对 User 实体这里会走合成 settings 路径（没有 settings.yml 也能加载）。
     let _ = gs.get_role(db, role_id).await?;
 
-    // 只补 present 不进 onstage：玩家身份实体没有立绘资源，上台会让前端渲染空位。
+    // User 身份没有立绘资源，只进感知集合不上台；AI 目标已由前置校验保证在舞台上，
+    // 这里的 insert 对已存在的 AI 目标幂等无副作用。
     if !gs.present_role_ids.contains(&role_id) {
         gs.present_role_ids.insert(role_id);
     }
@@ -83,5 +104,8 @@ pub async fn possess_entity(
         gs.present_role_ids
     );
 
-    Ok(gs.player.user_name.clone())
+    Ok(PossessOutcome {
+        display_name: gs.player.user_name.clone(),
+        handoff_role_id: handoff,
+    })
 }

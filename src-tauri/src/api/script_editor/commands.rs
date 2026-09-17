@@ -16,7 +16,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::AppState;
 use crate::ai_service::game_system::game_status::GameStatus;
-use crate::ai_service::types::ScriptStatus;
+use crate::ai_service::types::{PLAYER_ROLE_ID, ScriptStatus};
 use crate::api::{data_dir, game_data_dir};
 use crate::db::managers::role_repo::RoleRepo;
 
@@ -1533,6 +1533,8 @@ pub struct PreviewSession {
     /// 玩家副标题。试玩期间剧本 settings 里可能覆盖它，还原时一并回退，
     /// 否则不同角色的副标题会混搭到自由对话
     user_subtitle: String,
+    /// 试玩前的附身实体。试玩期间会重置为默认身份，离场时按此值还原
+    possessed_role_id: i32,
 }
 
 impl PreviewSession {
@@ -1559,7 +1561,15 @@ impl PreviewSession {
             script_status: gs.script_status.clone().map(Box::new),
             user_name: gs.player.user_name.clone(),
             user_subtitle: gs.player.user_subtitle.clone(),
+            possessed_role_id: gs.possessed_role_id,
         };
+
+        // 试玩不继承附身态：附身是自由对话的玩家身份，带进场会让玩家名与试玩搭出的
+        // 场次互相污染；置回默认身份并刷新玩家缓存，与离场还原快照保持同源。
+        gs.possessed_role_id = PLAYER_ROLE_ID;
+        if let Err(e) = gs.refresh_possessed_cache(db).await {
+            tracing::warn!("[ScriptEditor] 试玩前重置附身态失败: {}", e);
+        }
 
         // ---- 按「刚进游戏」的样子搭场次，对齐 init_game_status 的三件事 ----
         // 失败时把已拍快照套回去再报错：否则试玩启动失败也会把自由对话的
@@ -1632,6 +1642,12 @@ impl PreviewSession {
         gs.main_role_id = self.main_role_id;
         gs.current_role_id = self.current_role_id;
         gs.script_status = self.script_status.map(|b| *b);
+        // 附身态显式对齐保存值并刷新玩家缓存；随后的 user_name/subtitle 再覆盖回
+        // 保存值，保证与试玩前的自由对话完全一致。
+        gs.possessed_role_id = self.possessed_role_id;
+        if let Err(e) = gs.refresh_possessed_cache(db).await {
+            tracing::warn!("[ScriptEditor] 还原附身态失败: {}", e);
+        }
         gs.player.user_name = self.user_name;
         gs.player.user_subtitle = self.user_subtitle;
         // 台词表变短了，角色记忆要按新的列表重建，否则里面还留着试玩的内容
