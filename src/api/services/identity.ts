@@ -16,8 +16,6 @@ export interface IdentityInfo {
   role_id: number;
   name: string;
   profile: RoleProfile;
-  /** 是否为当前被附身实体 */
-  possessed: boolean;
 }
 
 /** 当前被附身实体的简要信息 */
@@ -27,7 +25,7 @@ export interface PossessedInfo {
   subtitle: string;
 }
 
-/** 获取全部玩家身份（含人设与附身标记） */
+/** 获取全部玩家身份（含人设） */
 export const listIdentities = async (): Promise<IdentityInfo[]> => {
   try {
     return await invoke<IdentityInfo[]>("list_identities");

@@ -15,14 +15,13 @@ use crate::config::AppConfig;
 use crate::db::managers::role_repo::RoleRepo;
 use crate::utils::prompt::PromptOptions;
 
-/// 一条玩家身份（含人设与是否为当前被附身实体）。
+/// 一条玩家身份（含人设）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct IdentityInfo {
     pub role_id: i32,
     pub name: String,
     pub profile: RoleProfile,
-    pub possessed: bool,
 }
 
 /// 当前被附身实体的简要信息。
@@ -77,14 +76,12 @@ pub async fn list_identities(app: AppHandle) -> Result<Vec<IdentityInfo>, String
     let identities = RoleRepo::list_player_identities(&state.db)
         .await
         .map_err(|e| format!("获取玩家身份列表失败: {}", e))?;
-    let possessed = current_possessed(&app).await;
     Ok(identities
         .into_iter()
         .map(|(role, profile)| IdentityInfo {
             role_id: role.id,
             name: role.name,
             profile,
-            possessed: role.id == possessed,
         })
         .collect())
 }

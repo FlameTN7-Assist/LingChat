@@ -341,7 +341,7 @@ impl RoleRepo {
     // ==============================================================
 
     // 本节方法属于统一实体的数据层公面，运行时消费方在 api/identity.rs 与
-    // game_system/possession.rs；set_role_profile 目前仅供未来字段级写入使用。
+    // game_system/possession.rs。
 
     /// 从 `profile_json` 原文解析人设。
     /// NULL/空白/坏 JSON 一律静默回退默认值——该列是可空增量列，旧库升级后全为 NULL，
@@ -362,24 +362,6 @@ impl RoleRepo {
             return Ok(RoleProfile::default());
         };
         Ok(Self::parse_profile_json(role_id, role.profile_json.as_deref()))
-    }
-
-    /// 写入实体人设（整体覆盖 `profile_json`）。
-    /// 为什么是覆盖而非字段级合并：调用方始终持有完整 RoleProfile，
-    /// 合并语义无法表达"把某字段清空"，反而会留下无法删除的旧值。
-    #[allow(dead_code)]
-    pub async fn set_role_profile(
-        db: &DatabaseConnection,
-        role_id: i32,
-        profile: &RoleProfile,
-    ) -> Result<()> {
-        let json = serde_json::to_string(profile).context("序列化角色人设失败")?;
-        role::Entity::update_many()
-            .col_expr(role::Column::ProfileJson, Expr::value(Some(json)))
-            .filter(role::Column::Id.eq(role_id))
-            .exec(db)
-            .await?;
-        Ok(())
     }
 
     /// 列出全部玩家身份（role_type=User，按 id 升序），并附带解析好的人设。
@@ -691,47 +673,6 @@ mod tests {
         assert_eq!(parsed.subtitle, "称号");
         assert_eq!(parsed.prompt, "");
         assert!(parsed.location_id.is_none());
-    }
-
-    #[tokio::test]
-    async fn player_identity_crud_roundtrip() {
-        let db = test_db().await;
-        let profile = RoleProfile {
-            subtitle: "小名".into(),
-            prompt: "温柔的人".into(),
-            ..Default::default()
-        };
-
-        let id = RoleRepo::create_player_identity(&db, "小明", &profile).await.unwrap();
-        assert!(id > 0);
-
-        let listed = RoleRepo::list_player_identities(&db).await.unwrap();
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].0.id, id);
-        assert_eq!(listed[0].0.role_type, RoleType::User);
-        assert!(listed[0].0.script_key.is_none());
-        assert!(listed[0].0.resource_folder.is_none());
-        assert_eq!(listed[0].1, profile);
-
-        let mut updated = profile.clone();
-        updated.subtitle = "新称号".into();
-        RoleRepo::update_player_identity(&db, id, "小红", &updated).await.unwrap();
-        let role = RoleRepo::get_role_by_id(&db, id).await.unwrap().unwrap();
-        assert_eq!(role.name, "小红");
-        assert_eq!(RoleRepo::get_role_profile(&db, id).await.unwrap(), updated);
-
-        // set_role_profile 独立覆盖
-        let direct = RoleProfile {
-            info: "一句话简介".into(),
-            ..Default::default()
-        };
-        RoleRepo::set_role_profile(&db, id, &direct).await.unwrap();
-        assert_eq!(RoleRepo::get_role_profile(&db, id).await.unwrap(), direct);
-
-        assert!(RoleRepo::delete_player_identity(&db, id).await.unwrap());
-        assert!(RoleRepo::get_role_by_id(&db, id).await.unwrap().is_none());
-        // 重复删除返回 false 而非报错
-        assert!(!RoleRepo::delete_player_identity(&db, id).await.unwrap());
     }
 
     #[tokio::test]
