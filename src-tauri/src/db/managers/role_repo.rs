@@ -423,8 +423,6 @@ impl RoleRepo {
         Ok(inserted.id)
     }
 
-    /// 更新玩家身份的名字与人设。
-    ///
     /// 改名保护与删除保护是两级：`delete_player_identity` 拒绝系统保护 id（id=0 永存，
     /// 不可删），但 id=0 作为**最常用的默认身份必须能改名/改人设**，故这里只校验
     /// `role_type=User`——id=1 等 Main/Npc/System 行自然被类型检查挡下。

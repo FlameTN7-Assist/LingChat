@@ -662,8 +662,8 @@ pub struct RoleProfile {
     /// 副标题/称号
     #[serde(default)]
     pub subtitle: String,
-    /// 身份介绍：身份的完整描述，同时充当该实体的人设材料（AI 控制时的 system 人设）
-    /// 与他人对它的认知简介，因此不再区分「人设提示词」与「简介」两个字段
+    /// 身份介绍：该实体的完整描述，同时充当人设材料（AI 控制时的 system 人设）
+    /// 与他人对它的认知摘要
     #[serde(default)]
     pub info: String,
     // ── 空间玩法预留，本期不写任何逻辑 ──

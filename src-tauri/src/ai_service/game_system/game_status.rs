@@ -136,8 +136,6 @@ impl GameStatus {
             .await
     }
 
-    /// 判断某实体此刻是否正被玩家附身。
-    ///
     /// 所有"是不是当前扮演者"的判据都应走这里，避免各处直接拿 `possessed_role_id`
     /// 做相等比较而散落口径。
     pub fn is_possessed(&self, role_id: i32) -> bool {

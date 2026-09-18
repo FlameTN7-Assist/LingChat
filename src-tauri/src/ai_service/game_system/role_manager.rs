@@ -352,7 +352,7 @@ impl GameRoleManager {
                 if let Some(sp) = Self::find_first_system_prompt(source_lines, rid) {
                     final_sliced.insert(0, sp.clone());
                 } else {
-                    // 人设本就为空时（如玩家身份实体没填 prompt），SYSTEM 行缺失是预期，
+                    // 人设本就为空时（如玩家身份实体没填介绍），SYSTEM 行缺失是预期，
                     // 不应告警刷屏；只有配置了人设却找不到注入行才是真的异常。
                     let persona_empty = self
                         .loaded_roles
@@ -755,7 +755,7 @@ pub fn user_identity_settings(role: &RoleModel, profile: &RoleProfile) -> Charac
     CharacterSettings {
         ai_name: role.name.clone(),
         ai_subtitle: Some(profile.subtitle.clone()),
-        // 身份只有「介绍」一个描述字段，它同时充当 system 人设材料与列表/上帝视角用的简介
+        // 身份只有一个「介绍」描述字段，它同时充当 system 人设材料与 God Agent 简介
         system_prompt: Some(profile.info.clone()),
         info: Some(profile.info.clone()),
         character_id: Some(role.id),

@@ -23,7 +23,6 @@ export interface PossessedInfo {
   subtitle: string;
 }
 
-/** 获取全部玩家身份（含人设） */
 export const listIdentities = async (): Promise<IdentityInfo[]> => {
   try {
     return await invoke<IdentityInfo[]>("list_identities");
@@ -32,7 +31,6 @@ export const listIdentities = async (): Promise<IdentityInfo[]> => {
   }
 };
 
-/** 新建玩家身份，返回新实体 role_id */
 export const createIdentity = async (name: string, profile: RoleProfile): Promise<number> => {
   try {
     return await invoke<number>("create_identity", { name, profile });
@@ -41,7 +39,6 @@ export const createIdentity = async (name: string, profile: RoleProfile): Promis
   }
 };
 
-/** 更新玩家身份的名字与人设 */
 export const updateIdentity = async (
   roleId: number,
   name: string,
@@ -72,7 +69,6 @@ export const possessEntity = async (roleId: number): Promise<string> => {
   }
 };
 
-/** 读取当前被附身实体 */
 export const getPossessedEntity = async (): Promise<PossessedInfo> => {
   try {
     return await invoke<PossessedInfo>("get_possessed_entity");
