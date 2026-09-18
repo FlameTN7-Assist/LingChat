@@ -1,5 +1,9 @@
 <template>
-  <div class="group relative flex h-full w-full items-center justify-center">
+  <div
+    ref="stageRootRef"
+    class="group relative flex h-full w-full items-center justify-center"
+    :class="{ 'is-hovered': isStageHovered }"
+  >
     <!-- 缩放与尺寸控制层 (无位移) -->
     <div
       class="animate-pet-scale relative transition-transform duration-300 ease-out"
@@ -10,7 +14,7 @@
         type="button"
         :aria-label="$t('views.pet.stage.openSettingsAria')"
         :title="$t('views.pet.stage.settings')"
-        class="absolute top-1 -left-3.5 z-40 flex h-8 w-8 translate-y-2 items-center justify-center rounded-full border border-white/10 bg-neutral-950/60 text-white opacity-0 shadow-[0_4px_12px_rgba(0,0,0,0.3)] backdrop-blur-xl transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 hover:scale-110 hover:bg-cyan-500/80 hover:text-white"
+        class="absolute top-1 -left-3.5 z-40 flex h-8 w-8 translate-y-2 items-center justify-center rounded-full border border-white/10 bg-neutral-950/60 text-white opacity-0 shadow-[0_4px_12px_rgba(0,0,0,0.3)] backdrop-blur-xl transition-all duration-300 group-[.is-hovered]:translate-y-0 group-[.is-hovered]:opacity-100 hover:scale-110 hover:bg-cyan-500/80 hover:text-white"
         @click.stop="handleOpenSettings"
       >
         <Settings :size="16" />
@@ -21,7 +25,7 @@
         type="button"
         :aria-label="$t('views.pet.stage.openAutoAria')"
         :title="$t('views.pet.stage.auto')"
-        class="absolute top-10 -left-3.5 z-40 flex h-8 w-8 translate-y-2 items-center justify-center rounded-full border border-white/10 bg-neutral-950/60 text-white opacity-0 shadow-[0_4px_12px_rgba(0,0,0,0.3)] backdrop-blur-xl transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 hover:scale-110 hover:bg-cyan-500/80 hover:text-white"
+        class="absolute top-10 -left-3.5 z-40 flex h-8 w-8 translate-y-2 items-center justify-center rounded-full border border-white/10 bg-neutral-950/60 text-white opacity-0 shadow-[0_4px_12px_rgba(0,0,0,0.3)] backdrop-blur-xl transition-all duration-300 group-[.is-hovered]:translate-y-0 group-[.is-hovered]:opacity-100 hover:scale-110 hover:bg-cyan-500/80 hover:text-white"
         :class="{ '!border-cyan-400/50 !bg-cyan-500/80': uiStore.autoMode }"
         @click.stop="handleSwitchAutoMode"
       >
@@ -34,7 +38,7 @@
         type="button"
         :aria-label="$t('views.pet.stage.backHome')"
         :title="$t('views.pet.stage.backHome')"
-        class="absolute top-19 -left-3.5 z-40 flex h-8 w-8 translate-y-2 items-center justify-center rounded-full border border-white/10 bg-neutral-950/60 text-white opacity-0 shadow-[0_4px_12px_rgba(0,0,0,0.3)] backdrop-blur-xl transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 hover:scale-110 hover:bg-cyan-500/80 hover:text-white"
+        class="absolute top-19 -left-3.5 z-40 flex h-8 w-8 translate-y-2 items-center justify-center rounded-full border border-white/10 bg-neutral-950/60 text-white opacity-0 shadow-[0_4px_12px_rgba(0,0,0,0.3)] backdrop-blur-xl transition-all duration-300 group-[.is-hovered]:translate-y-0 group-[.is-hovered]:opacity-100 hover:scale-110 hover:bg-cyan-500/80 hover:text-white"
         @click.stop="handleExitPetMode"
       >
         <LogOut :size="16" />
@@ -42,7 +46,7 @@
 
       <!-- 截图按钮 -->
       <div
-        class="absolute top-28 -left-3.5 z-40 translate-y-2 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100"
+        class="absolute top-28 -left-3.5 z-40 translate-y-2 opacity-0 transition-all duration-300 group-[.is-hovered]:translate-y-0 group-[.is-hovered]:opacity-100"
       >
         <button
           type="button"
@@ -62,7 +66,7 @@
 
       <!-- 语音输入按钮（与桌面 GameDialog 同源：useAsrInput 共享会话） -->
       <div
-        class="absolute top-37 -left-3.5 z-40 translate-y-2 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100"
+        class="absolute top-37 -left-3.5 z-40 translate-y-2 opacity-0 transition-all duration-300 group-[.is-hovered]:translate-y-0 group-[.is-hovered]:opacity-100"
       >
         <!-- 自动监听开着但当前已暂停时，用强调色提示"点一下可恢复"。
              原先这里写的是 !asrPhase，而 phase 只会是 idle/recording/recognizing
@@ -118,6 +122,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
+import { listen } from "@tauri-apps/api/event";
 import { useI18n } from "vue-i18n";
 import { useGameStore } from "@/stores/modules/game";
 import { useUIStore } from "@/stores/modules/ui/ui";
@@ -171,6 +176,57 @@ const singleRole = computed(() => {
 const frameSize = computed(() => {
   const scale = settingsStore.pet?.scale || 1;
   return Math.round(210 * scale);
+});
+
+// --- 舞台悬停态（驱动按钮与角色铭牌的显隐）---
+// 桌面端不能用 CSS :hover：光标离开 solid 区域后窗口会自动开启点击穿透
+// （见 src-tauri/src/api/pet.rs 的 spawn_hit_test_poll），webview 从此收不到鼠标事件，
+// :hover 会冻结在最后一次状态，按钮/铭牌第一次悬停后就再也隐藏不掉。
+// 因此优先用 Rust 侧的全局鼠标广播 pet:cursor（每 50ms 上报窗口内逻辑坐标，
+// 与 getBoundingClientRect 同坐标系，Live2D 视线也用的它）自行判定；
+// 该事件只由桌面端轮询广播，没有它的环境（移动端、Linux 取坐标失败时）退回 DOM
+// 指针事件——那些环境没有点击穿透，DOM 事件本来就是可靠的。
+// 模板对应 group-[.is-hovered]: 变体（含 GameRoleAvatar 的角色铭牌）。
+const stageRootRef = ref<HTMLElement | null>(null);
+const isStageHovered = ref(false);
+let cursorUnlisten: (() => void) | null = null;
+
+const syncStageHover = (x: number, y: number) => {
+  const rect = stageRootRef.value?.getBoundingClientRect();
+  if (!rect) return;
+  // 光标移出窗口时上报的坐标会越界（负值/超出），该判断同时覆盖"离开窗口"
+  isStageHovered.value = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+};
+
+// DOM 兜底：pointermove 覆盖鼠标环境，pointerdown 让触屏点按也能唤出按钮
+// （触屏 pointerup 后紧跟 pointerleave，不能监听 leave）
+const onDomPointer = (event: PointerEvent) => syncStageHover(event.clientX, event.clientY);
+const stopDomPointerFallback = () => {
+  window.removeEventListener("pointermove", onDomPointer);
+  window.removeEventListener("pointerdown", onDomPointer);
+};
+
+onMounted(() => {
+  window.addEventListener("pointermove", onDomPointer, { passive: true });
+  window.addEventListener("pointerdown", onDomPointer, { passive: true });
+
+  void listen<{ x: number; y: number }>("pet:cursor", (event) => {
+    // 收到全局广播后 DOM 事件就没用了：穿透开启后它会停发，留着反而会用陈旧位置覆盖广播
+    stopDomPointerFallback();
+    syncStageHover(event.payload.x, event.payload.y);
+  })
+    .then((unlisten) => {
+      cursorUnlisten = unlisten;
+    })
+    .catch(() => {
+      // 无 Tauri 事件系统：继续用 DOM 指针事件兜底
+    });
+});
+
+onUnmounted(() => {
+  stopDomPointerFallback();
+  cursorUnlisten?.();
+  cursorUnlisten = null;
 });
 
 // Live2D 渲染帧率上限（0 = 不限制）：来自桌宠设置 pet.live2dFps，默认 30

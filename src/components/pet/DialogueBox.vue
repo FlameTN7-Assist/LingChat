@@ -2,7 +2,11 @@
   <div
     @click="handleDialogueClick"
     class="relative z-30 flex w-full cursor-pointer items-center justify-center transition-all duration-300 ease-out"
-    :class="isVisible ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-2 opacity-0'"
+    :class="
+      isVisible
+        ? 'translate-y-0 opacity-100'
+        : 'pointer-events-none h-0 -translate-y-2 overflow-hidden opacity-0'
+    "
   >
     <div
       ref="bubbleRef"

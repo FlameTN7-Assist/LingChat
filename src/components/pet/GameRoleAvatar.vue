@@ -5,9 +5,10 @@
   >
     <!-- 缩放与尺寸控制层 (无位移) -->
     <div class="relative h-full w-full">
-      <!-- 1. 右上角信息铭牌 -->
+      <!-- 1. 右上角信息铭牌（悬停显隐由祖先 .is-hovered 驱动，不能用 CSS :hover：
+           窗口会开点击穿透，见 GameRolesStage.vue 的 isStageHovered 说明） -->
       <div
-        class="pointer-events-none absolute top-1 -right-4 z-50 flex translate-x-4 flex-col items-start opacity-0 transition-all duration-400 ease-out group-hover:translate-x-0 group-hover:opacity-100"
+        class="pointer-events-none absolute top-1 -right-4 z-50 flex translate-x-4 flex-col items-start opacity-0 transition-all duration-400 ease-out group-[.is-hovered]:translate-x-0 group-[.is-hovered]:opacity-100"
       >
         <div
           class="rounded-tl-md rounded-br-md bg-cyan-500 px-2 py-0.5 text-[10px] font-black tracking-wider text-white italic shadow-sm"

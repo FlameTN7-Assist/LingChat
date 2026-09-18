@@ -93,6 +93,8 @@ pub struct InnerAppState {
     /// 流式任务（publisher/consumer）的迟到写入也会被 `preview_generation` 守卫
     /// 丢弃，`ai:reply` 则带 `preview_gen` 代号由前端比对丢弃（issue #5）。
     pub preview_task: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    /// 当前剧本引擎任务的句柄：读档/新起跑时据此中止旧引擎，防止旧任务污染恢复后的状态。
+    pub script_task: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
     /// 试玩开始时拍下的会话快照，供收尾时一次性还原。`Option::take` 保证幂等：
     /// 任务自然结束先还原、`editor_stop_preview` 兜底再 take 一次为空即跳过。
     pub pending_preview_restore:

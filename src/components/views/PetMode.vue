@@ -6,13 +6,15 @@
     @mouseleave="handleMouseLeave"
     class="relative flex h-(--app-height) w-(--app-width) flex-col items-center justify-start overflow-hidden bg-transparent transition-none select-none"
   >
-    <!-- DialogueBox 区域 -->
+    <!-- 装饰带（气泡/通知）：高度完全随内容（无预留）→ 顶部永远没有透明空间：
+         默认在宠物上方（气泡吸顶，宠物被往下让位）；设置=下方时夹在宠物与输入框之间（气泡贴宠物下沿） -->
     <div
+      ref="decorBand"
       class="flex w-full shrink-0 flex-col justify-end bg-transparent transition-none"
-      :style="{ height: 'var(--dialog-h)' }"
+      :style="{ order: bubbleBelow ? 1 : 0 }"
     >
       <PetNotification />
-      <div class="mt-1 flex items-end justify-center">
+      <div class="flex items-end justify-center" :class="{ 'mb-1': bubbleVisible }">
         <DialogueBox ref="gameDialogRef" @player-continued="manualTriggerContinue" />
       </div>
     </div>
@@ -35,25 +37,28 @@
       </div>
     </DragArea>
 
-    <!-- ChatInput 区域 -->
+    <!-- ChatInput 区域（始终贴住上方元素：默认在宠物正下方，设置=下方时在气泡带之下） -->
     <div
       ref="chatContainer"
       class="flex w-full shrink-0 items-start justify-center bg-transparent transition-none"
-      :style="{ height: 'var(--chat-h)' }"
+      :style="{ height: 'var(--chat-h)', order: bubbleBelow ? 2 : 0 }"
     >
       <ChatInput ref="ChatInputRef" :visible="showChatInput" />
     </div>
+
+    <!-- 余量吸收带：只在“下方”模式接管气泡带腾出的空间，保证窗口总高恒定（不上报 solid 区域） -->
+    <div class="w-full flex-1" :style="{ order: bubbleBelow ? 3 : 0 }"></div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { useGameStore } from "@/stores/modules/game";
-import { useSettingsStore } from "@/stores/modules/settings";
+import { useSettingsStore, type BubbleSide } from "@/stores/modules/settings";
 import { useUIStore } from "@/stores/modules/ui/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { useFileDrop } from "../pet/useFileDrop";
@@ -64,7 +69,7 @@ import DialogueBox from "../pet/DialogueBox.vue";
 import DragArea from "../pet/DragArea.vue";
 import GameRolesStage from "../pet/GameRolesStage.vue";
 import PetNotification from "../pet/PetNotification.vue";
-import { BASE_AVATAR_SIZE, CHAT_BASE_H, DIALOG_MAX_BASE } from "../pet/constants";
+import { AVATAR_BAND_BASE, CHAT_BASE_H, DIALOG_MAX_BASE, PET_WIDTH_BASE } from "../pet/constants";
 
 const { t } = useI18n();
 const router = useRouter();
@@ -77,28 +82,121 @@ const { isDragging, hasFile } = useFileDrop();
 
 const avatarContainer = ref<HTMLElement | null>(null);
 const chatContainer = ref<HTMLElement | null>(null);
+const decorBand = ref<HTMLElement | null>(null);
 const gameDialogRef = ref<InstanceType<typeof DialogueBox> | null>(null);
 const ChatInputRef = ref<InstanceType<typeof ChatInput> | null>(null);
 
+// 气泡/通知位置（用户设置）：above = 宠物上方，below = 宠物与输入框之间，auto = 按宠物在屏幕中的位置自动选
+const bubbleSide = computed(() => settingsStore.pet?.bubbleSide ?? "above");
+const autoBubbleBelow = ref(false);
+// 自动判据看宠物圆心落在工作区上半还是下半：与气泡布局本身无关，不会来回抖动
+const bubbleBelow = computed(
+  () => bubbleSide.value === "below" || (bubbleSide.value === "auto" && autoBubbleBelow.value),
+);
+
+let autoSideTimer: number | undefined;
+const refreshAutoBubbleSide = async () => {
+  if (bubbleSide.value !== "auto") return;
+  try {
+    const [pos, monitor] = await Promise.all([
+      getCurrentWindow().outerPosition(),
+      currentMonitor(),
+    ]);
+    if (!monitor) return;
+    const { position, size } = monitor.workArea;
+    // 宠物可见圆心（窗口顶边 + 头像带一半）落在工作区上半 → 气泡下置
+    const petCenterY =
+      pos.y + (AVATAR_BAND_BASE * (settingsStore.pet?.scale ?? 1) * monitor.scaleFactor) / 2;
+    autoBubbleBelow.value = petCenterY < position.y + size.height / 2;
+  } catch {
+    // 拿不到显示器信息时保持上一次判定
+  }
+};
+
+// 原生拖拽期间 onMoved 会高频触发，去抖后再算
+const scheduleAutoBubbleSide = () => {
+  if (autoSideTimer !== undefined) window.clearTimeout(autoSideTimer);
+  autoSideTimer = window.setTimeout(() => void refreshAutoBubbleSide(), 150);
+};
+
+// —— 换位 / 推挤动效（FLIP 思路）：flex 的 order 与“内容撑高”都无法过渡 ——
+// 换位：切换前记下位置，反向 transform 起手再弹性归位；气泡带同时淡入；
+// 推挤：气泡/通知撑高装饰带时，用高度差反推被顶开元素的旧位置，同样弹性滑回。
+const MOTION_DURATION = 420;
+const MOTION_EASING = "cubic-bezier(0.34, 1.28, 0.4, 1)"; // 末端轻微回弹
+let swapStartTops: [HTMLElement, number][] = [];
+
+const swapElements = () =>
+  [decorBand.value, avatarContainer.value, chatContainer.value].filter(
+    (el): el is HTMLElement => el !== null,
+  );
+
+// 从“旧位置”（相对当前布局偏移 dy）弹性滑回；fade 用于气泡带换位时的浮现
+const animateFrom = (el: HTMLElement, dy: number, fade = false) => {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || Math.abs(dy) < 1) return;
+  // 上一段动效直接归位，避免两次位移叠加
+  el.getAnimations().forEach((anim) => anim.finish());
+  el.animate(
+    [
+      { transform: `translateY(${dy}px)`, opacity: fade ? 0.25 : 1 },
+      { transform: "translateY(0)", opacity: 1 },
+    ],
+    { duration: MOTION_DURATION, easing: MOTION_EASING },
+  );
+};
+
+const captureSwapStart = () => {
+  swapStartTops = swapElements().map((el) => {
+    el.getAnimations().forEach((anim) => anim.finish());
+    return [el, el.getBoundingClientRect().top];
+  });
+};
+
+const playSwap = () => {
+  for (const [el, startTop] of swapStartTops) {
+    animateFrom(el, startTop - el.getBoundingClientRect().top, el === decorBand.value);
+  }
+  swapStartTops = [];
+};
+
+// 气泡上/下切换（拖拽进出屏幕上半区、设置里改选项）时播放换位动效
+watch(bubbleBelow, async () => {
+  captureSwapStart();
+  await nextTick();
+  playSwap();
+});
+
+// 气泡/通知出现、消失、改高会立刻把下方内容顶开 → 观察装饰带高度，把被顶开的元素弹性推回
+let bandHeight: number | null = null;
+const bandObserver = new ResizeObserver(() => {
+  const band = decorBand.value;
+  if (!band) return;
+  const rect = band.getBoundingClientRect();
+  const dy = bandHeight === null ? 0 : rect.height - bandHeight;
+  bandHeight = rect.height;
+  if (!dy) return;
+  for (const el of swapElements()) {
+    // 带子自身是“原地长高”，不位移；只有排在它下方被顶开的元素才回弹
+    if (el !== band && el.getBoundingClientRect().top > rect.top) animateFrom(el, -dy);
+  }
+});
+
+// 气泡当前是否有内容（显隐与点击穿透上报共用）
+const bubbleVisible = computed(
+  () => gameStore.currentStatus === "responding" && gameStore.currentLine.trim() !== "",
+);
+
 const appStyleVars = computed(() => {
   const scale = settingsStore.pet?.scale || 1.0;
-  const layout = calcWindowLayout(scale);
   return {
     "--pet-ui-scale": scale.toString(),
-    "--app-width": `${layout.width}px`,
-    "--app-height": `${layout.height}px`,
-    "--avatar-size": `${Math.round(BASE_AVATAR_SIZE * scale)}px`,
+    "--app-width": `${Math.round(PET_WIDTH_BASE * scale)}px`,
+    "--app-height": `${Math.round((AVATAR_BAND_BASE + CHAT_BASE_H + DIALOG_MAX_BASE) * scale)}px`,
+    "--avatar-size": `${Math.round(AVATAR_BAND_BASE * scale)}px`,
     "--chat-h": `${Math.round(CHAT_BASE_H * scale)}px`,
     "--dialog-h": `${Math.round(DIALOG_MAX_BASE * scale)}px`,
   };
 });
-
-const calcWindowLayout = (scale: number): { width: number; height: number } => {
-  const S = Math.round(BASE_AVATAR_SIZE * scale);
-  const chatH = Math.round(CHAT_BASE_H * scale);
-  const dialogH = Math.round(DIALOG_MAX_BASE * scale);
-  return { width: S, height: S + dialogH + chatH };
-};
 
 const applyWindowLayout = async () => {
   try {
@@ -115,6 +213,9 @@ let effectUnlisten: (() => void) | null = null;
 let volumeUnlisten: (() => void) | null = null;
 let live2dFpsUnlisten: (() => void) | null = null;
 let dialogHistoryUnlisten: (() => void) | null = null;
+let cursorUnlisten: (() => void) | null = null;
+let bubbleSideUnlisten: (() => void) | null = null;
+let movedUnlisten: (() => void) | null = null;
 
 onMounted(async () => {
   const appWindow = getCurrentWindow();
@@ -159,6 +260,31 @@ onMounted(async () => {
     });
   });
 
+  // 输入框显隐兜底：光标是否仍在桌宠窗口内。不能只靠 #pet-app 的
+  // mouseenter/mouseleave —— 光标离开 solid 区域后窗口会自动开启点击穿透
+  // （见 src-tauri/src/api/pet.rs 的 spawn_hit_test_poll），webview 从此收不到
+  // 鼠标事件，mouseleave 可能永远不来、输入框再也隐藏不掉。pet:cursor 是 Rust 侧
+  // 全局轮询广播（每 50ms，窗口内逻辑坐标，与 DOM 同坐标系），可兜住这种情况。
+  cursorUnlisten = await appWindow.listen<{ x: number; y: number }>("pet:cursor", (event) => {
+    const { x, y } = event.payload;
+    setShowChatInput(x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight);
+  });
+
+  // 设置窗口改了气泡位置：即时换位（纯 CSS 换 order，不动窗口尺寸，不会闪）
+  bubbleSideUnlisten = await appWindow.listen<{ side: BubbleSide }>(
+    "pet-bubble-side-changed",
+    (event) => {
+      if (event.payload?.side) settingsStore.pet.bubbleSide = event.payload.side;
+    },
+  );
+
+  // 自动模式：窗口移动（原生拖拽、换屏）后重算气泡在上还是在下
+  movedUnlisten = await appWindow.onMoved(scheduleAutoBubbleSide);
+  await refreshAutoBubbleSide();
+
+  // 气泡/通知撑高装饰带时，把被顶开的内容弹性推回（见 bandObserver）
+  if (decorBand.value) bandObserver.observe(decorBand.value);
+
   // 设置透明背景的 body 属性样式（额外防护）
   document.body.style.backgroundColor = "transparent";
   document.documentElement.style.backgroundColor = "transparent";
@@ -173,11 +299,7 @@ onMounted(async () => {
     const rects = [];
 
     // 如果对话气泡正在显示，则加入 solid region（用气泡元素精确 rect，避免包住整个对话框）
-    if (
-      gameDialogRef.value?.bubbleRef &&
-      gameStore.currentStatus === "responding" &&
-      gameStore.currentLine.trim() !== ""
-    ) {
+    if (gameDialogRef.value?.bubbleRef && bubbleVisible.value) {
       const r = gameDialogRef.value.bubbleRef.getBoundingClientRect();
       if (r.height > 0) {
         rects.push({ x: r.x, y: r.y, width: r.width, height: r.height });
@@ -219,6 +341,9 @@ watch(
   },
 );
 
+// 设置里切到/切出“自动”时立即重算一次
+watch(bubbleSide, () => void refreshAutoBubbleSide());
+
 // 监听 dialogHistory 变化，推送给设置窗口
 watch(
   () => gameStore.dialogHistory.length,
@@ -240,23 +365,28 @@ onUnmounted(() => {
   if (volumeUnlisten) volumeUnlisten();
   if (live2dFpsUnlisten) live2dFpsUnlisten();
   if (dialogHistoryUnlisten) dialogHistoryUnlisten();
+  if (cursorUnlisten) cursorUnlisten();
+  if (bubbleSideUnlisten) bubbleSideUnlisten();
+  if (movedUnlisten) movedUnlisten();
+  if (autoSideTimer !== undefined) window.clearTimeout(autoSideTimer);
+  bandObserver.disconnect();
 
   if (hitTestInterval !== undefined) {
     window.clearInterval(hitTestInterval);
   }
 });
 
+// 光标在桌宠窗口内就显示输入框，离开则隐藏；草稿非空（正在打字）时保持显示
+const setShowChatInput = (insideWindow: boolean) => {
+  showChatInput.value = insideWindow || (ChatInputRef.value?.isTyping() ?? false);
+};
+
 const handleMouseEnter = () => {
-  showChatInput.value = true;
+  setShowChatInput(true);
 };
 
 const handleMouseLeave = () => {
-  if (ChatInputRef.value?.isTyping()) {
-    showChatInput.value = true;
-    return;
-  } else {
-    showChatInput.value = false;
-  }
+  setShowChatInput(false);
 };
 
 const handleAvatarClick = () => {

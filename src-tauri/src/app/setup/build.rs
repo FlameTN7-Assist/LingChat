@@ -277,6 +277,7 @@ pub(super) fn build_service_graph(
             ai_service::tools::background_command::BackgroundCommandManager::default(),
         ),
         preview_task: Arc::new(tokio::sync::Mutex::new(None)),
+        script_task: Arc::new(tokio::sync::Mutex::new(None)),
         pending_preview_restore: Arc::new(tokio::sync::Mutex::new(None)),
     };
 

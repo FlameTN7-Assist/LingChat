@@ -166,6 +166,7 @@ import { MenuPage, MenuItem } from "../../ui";
 import { Input } from "../../base";
 import { useGameStore } from "../../../stores/modules/game";
 import { applyWebInitData } from "../../../stores/modules/game/actions";
+import { eventQueue } from "../../../core/events/event-queue";
 import { useUIStore } from "../../../stores/modules/ui/ui";
 import { useDialogStore } from "../../../stores/modules/ui/dialog";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
@@ -288,9 +289,18 @@ const handleCreateSave = async () => {
   }
   actionLoading.value = -1;
   try {
+    const cursor = gameStore.scriptReadCursor;
     await invoke<CreateSaveResponse>("create_save", {
       title: newSaveTitle.value.trim(),
       screenshotPath: await ensureScreenshot(),
+      ...(cursor
+        ? {
+            playerChapter: cursor.chapter,
+            playerEventIndex: cursor.eventIndex,
+            playerLineCount: cursor.lineCount,
+            playerVarsJson: JSON.stringify(cursor.vars),
+          }
+        : {}),
     });
     newSaveTitle.value = "";
     uiStore.showSuccess({
@@ -313,12 +323,25 @@ const handleLoadSave = async (saveId: number) => {
   const confirmed = await dialogStore.confirm(t("settings.save.msg.loadConfirm"));
   if (!confirmed) return;
   actionLoading.value = saveId;
+  // 读档会整体替换游戏状态：先清空事件队列，旧会话积压的剧本事件不得播进新会话。
+  // clear 会暂停队列，invoke 期间到达的新事件（读档续跑的引擎已经在跑）只排队不播放，
+  // 待状态落地后统一 resume，保证它们被消费时剧情模式标记已就位。
+  eventQueue.clear();
   try {
     const gameInfo = await invoke<WebInitData>("load_save", { saveId });
-    // 读档会整体替换游戏状态，先清掉上一局的剧本标记，避免陈旧选项/章节名残留；
-    // load_save 不恢复剧本引擎，读档后一律回到自由对话模式
-    gameStore.exitStoryMode();
     applyWebInitData(gameStore.$state, gameInfo);
+
+    // 此处解决了 剧本状态持久化和自动事件clear，注意之后出问题了可以看这里的代码
+    gameStore.scriptReadCursor = null;
+    // 存档带剧本进度时后端已从存档点续跑引擎，前端同步回到剧情模式；否则回到自由对话
+    if (gameInfo.active_script) {
+      gameStore.enterStoryMode(gameInfo.active_script);
+    } else {
+      gameStore.exitStoryMode();
+    }
+    // 读档后丢弃旧会话残留事件队列（防止旧角色未说完的回复串进新存档对话，issue #796）
+    eventQueue.clear();
+    eventQueue.resume();
     uiStore.showSuccess({
       title: t("settings.save.msg.loadSuccessTitle"),
       message: t("settings.save.msg.loadSuccessMsg"),
@@ -335,6 +358,7 @@ const handleLoadSave = async (saveId: number) => {
       message: typeof e === "string" ? e : e.message || t("settings.save.msg.unknownError"),
     });
   } finally {
+    eventQueue.resume();
     actionLoading.value = null;
   }
 };
@@ -344,9 +368,18 @@ const handleSaveGame = async (saveId: number) => {
   if (!confirmed) return;
   actionLoading.value = saveId;
   try {
+    const cursor = gameStore.scriptReadCursor;
     await invoke("update_save", {
       saveId,
       screenshotPath: await ensureScreenshot(),
+      ...(cursor
+        ? {
+            playerChapter: cursor.chapter,
+            playerEventIndex: cursor.eventIndex,
+            playerLineCount: cursor.lineCount,
+            playerVarsJson: JSON.stringify(cursor.vars),
+          }
+        : {}),
     });
     uiStore.showSuccess({
       title: t("settings.save.msg.overwriteSuccessTitle"),

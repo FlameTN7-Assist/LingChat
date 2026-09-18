@@ -77,9 +77,57 @@ pub async fn list_standalone_scripts(app: AppHandle) -> Result<ScriptListRespons
     Ok(ScriptListResponse { scripts })
 }
 
-#[tauri::command]
-pub async fn start_script(app: AppHandle, script_name: String) -> Result<(), String> {
+/// 剧本/冒险启动前的互斥校验（命令层第一道闸）。
+///
+/// 附身态启动会让玩家身份与剧本场次互相污染；已有 run 在跑时重复启动会让两个
+/// run 争抢同一份 `script_status` 与输入通道，前端也收不到明确的结束信号。
+/// 注意：读档续跑（`api/save.rs`）直连 `spawn_script_execution` 恢复被中止的引擎，
+/// 不复用本校验——`is_running` 会因为任务被 abort 而残留 true。
+pub(crate) async fn ensure_script_start_allowed(
+    app: &AppHandle,
+    kind: &str,
+) -> Result<(), String> {
     let state = app.state::<AppState>();
+    let service = state.ai_service.lock().await;
+
+    // 带附身启动会让玩家身份与剧本场次互相污染，先要求解除扮演
+    {
+        let gs = service.game_status.lock().await;
+        if gs.possessed_role_id != PLAYER_ROLE_ID {
+            return Err(format!("请先解除扮演（切回默认身份）后再开始{kind}"));
+        }
+    }
+
+    // 同一时刻只允许一个剧本/冒险占用引擎
+    if service
+        .script_manager
+        .is_running
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return Err("已有剧本或冒险正在进行中".to_string());
+    }
+
+    Ok(())
+}
+
+/// 在后台任务中执行剧本（含羁绊完成处理），并把任务句柄登记到 AppState。
+/// 新引擎起跑前先中止上一个登记的引擎任务并清理其输入通道——
+/// 阻塞中的旧引擎靠 oneshot 挂起，不中止就会往新会话的共享 GameStatus 里写台词。
+pub(crate) async fn spawn_script_execution(
+    app: AppHandle,
+    script: crate::ai_service::types::ScriptStatus,
+) {
+    let state = app.state::<AppState>();
+
+    if let Some(handle) = state.script_task.lock().await.take() {
+        handle.abort();
+    }
+    {
+        let mut ch = state.script_channels.lock().await;
+        let _ = ch.input_tx.take();
+        let _ = ch.choice_tx.take();
+        ch.choice_allow_free = false;
+    }
 
     // Clone shared handles for the background task
     let ai_service = state.ai_service.clone();
@@ -89,39 +137,23 @@ pub async fn start_script(app: AppHandle, script_name: String) -> Result<(), Str
     let llm = crate::ai_service::llm::slot_snapshot(&state.chat.llm).await;
     let achievement_manager = state.achievement_manager.clone();
 
-    // Lock AIService briefly to validate and extract needed data
-    let (script, game_status, config, is_running) = {
+    // Lock AIService briefly to extract needed data
+    let (game_status, config, is_running) = {
         let service = ai_service.lock().await;
-        let script = service
-            .script_manager
-            .all_scripts
-            .get(&script_name)
-            .ok_or_else(|| format!("剧本不存在: '{}'", script_name))?
-            .clone();
-        let game_status = service.game_status.clone();
-        // 带附身启动剧本会让玩家身份与剧本场次互相污染，先要求解除扮演
-        {
-            let gs = game_status.lock().await;
-            if gs.possessed_role_id != PLAYER_ROLE_ID {
-                return Err("请先解除扮演（切回默认身份）后再开始剧本".to_string());
-            }
-        }
-        let config = service.config.clone();
-        let is_running = service.script_manager.is_running.clone();
-        // 同一时刻只允许一个剧本/冒险占用引擎：重复启动会让两个 run 争抢同一份
-        // script_status 与输入通道，前端也收不到明确的结束信号
-        if is_running.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err("已有剧本或冒险正在进行中".to_string());
-        }
-        (script, game_status, config, is_running)
+        (
+            service.game_status.clone(),
+            service.config.clone(),
+            service.script_manager.is_running.clone(),
+        )
     };
 
-    // Run script in background task (does NOT hold AIService lock across awaits)
-    tokio::spawn(async move {
+    // `app` 仍需被 `state` 借用（登记任务句柄要用），后台任务持有一份克隆
+    let task_app = app.clone();
+    let handle = tokio::spawn(async move {
         let mut ctx = ScriptContext {
             db: &db,
             data_dir: &data_dir,
-            app: &app,
+            app: &task_app,
             game_status,
             config: &config,
             llm: llm.as_ref(),
@@ -136,7 +168,7 @@ pub async fn start_script(app: AppHandle, script_name: String) -> Result<(), Str
                     super::adventure::handle_adventure_completion(
                         &db,
                         &achievement_manager,
-                        &app,
+                        &task_app,
                         &ai_service,
                         &script.folder_key,
                         &script.adventure.completion_achievements,
@@ -149,6 +181,27 @@ pub async fn start_script(app: AppHandle, script_name: String) -> Result<(), Str
             Err(e) => tracing::error!("[ScriptAPI] 剧本执行错误: {}", e),
         }
     });
+
+    *state.script_task.lock().await = Some(handle);
+}
+
+#[tauri::command]
+pub async fn start_script(app: AppHandle, script_name: String) -> Result<(), String> {
+    // 先过附身/并发互斥校验：被拒时命令返回 Err，前端不会进入剧本模式
+    ensure_script_start_allowed(&app, "剧本").await?;
+
+    let script = {
+        let state = app.state::<AppState>();
+        let service = state.ai_service.lock().await;
+        service
+            .script_manager
+            .all_scripts
+            .get(&script_name)
+            .ok_or_else(|| format!("剧本不存在: '{}'", script_name))?
+            .clone()
+    };
+
+    spawn_script_execution(app, script).await;
 
     Ok(())
 }

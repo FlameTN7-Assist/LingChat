@@ -1,20 +1,16 @@
 <template>
   <div
-    class="group relative flex items-center rounded-2xl border border-white/20 bg-white/10 p-4
-      backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-white/40
-      hover:shadow-2xl hover:shadow-indigo-500/20"
+    class="group relative flex items-center rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-white/40 hover:shadow-2xl hover:shadow-indigo-500/20"
   >
     <div
-      class="text-brand absolute -top-2 -left-2 flex h-6 w-6 -rotate-18 transform items-center
-        justify-center rounded-full shadow-md"
+      class="text-brand absolute -top-2 -left-2 flex h-6 w-6 -rotate-18 transform items-center justify-center rounded-full shadow-md"
     >
       <Cat :size="20" />
     </div>
     <div class="absolute top-3 right-3 z-10 flex items-center gap-2">
       <RoleExportMenu :role-id="id" :role-name="name" />
       <button
-        class="flex items-center justify-center rounded-full bg-black/5 p-1 text-white/60
-          transition-all hover:rotate-90 hover:bg-white/10 hover:text-white"
+        class="flex items-center justify-center rounded-full bg-black/5 p-1 text-white/60 transition-all hover:rotate-90 hover:bg-white/10 hover:text-white"
         title="角色设置"
         @click.stop="openSettingsModal"
       >
@@ -23,12 +19,10 @@
     </div>
 
     <div
-      class="flex w-28 shrink-0 flex-col items-center space-y-2 border-r border-white/10 pr-4
-        md:w-32"
+      class="flex w-28 shrink-0 flex-col items-center space-y-2 border-r border-white/10 pr-4 md:w-32"
     >
       <div
-        class="h-24 w-24 overflow-hidden rounded-full border-2 border-indigo-400/50 shadow-lg
-          md:h-24 md:w-24"
+        class="h-24 w-24 overflow-hidden rounded-full border-2 border-indigo-400/50 shadow-lg md:h-24 md:w-24"
       >
         <img
           :src="avatar"
@@ -55,8 +49,7 @@
           <!-- 扮演中徽标：附身态显示，名字口径为 ai_name（name） -->
           <span
             v-if="isPossessed()"
-            class="mb-3 shrink-0 rounded-full border border-emerald-400/40 bg-emerald-300/10
-              px-2 py-0.5 text-[10px] text-emerald-200"
+            class="mb-3 shrink-0 rounded-full border border-emerald-400/40 bg-emerald-300/10 px-2 py-0.5 text-[10px] text-emerald-200"
           >
             {{ $t("ui.characterCard.possessing") }}
           </span>
@@ -80,8 +73,7 @@
             'flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-xs font-semibold transition-all',
             possessDisabled
               ? 'cursor-not-allowed border-white/10 bg-white/5 text-white/30'
-              : `border-amber-400 bg-amber-500/80 text-white shadow-lg shadow-amber-500/20
-                hover:bg-amber-500`,
+              : `border-amber-400 bg-amber-500/80 text-white shadow-lg shadow-amber-500/20 hover:bg-amber-500`,
           ]"
         >
           <Loader2 v-if="possessing" :size="12" class="animate-spin" />
@@ -90,8 +82,7 @@
         </button>
         <button
           @click="showDetailModal"
-          class="rounded-full border border-white/10 bg-white/10 px-4 py-1.5 text-xs font-semibold
-            text-white transition-all hover:bg-white/20"
+          class="rounded-full border border-white/10 bg-white/10 px-4 py-1.5 text-xs font-semibold text-white transition-all hover:bg-white/20"
         >
           {{ $t("ui.characterCard.detail") }}
         </button>
@@ -99,8 +90,7 @@
         <button
           v-if="!isInScene()"
           @click="joinScene"
-          class="rounded-full border border-cyan-400 bg-cyan-500/80 px-4 py-1.5 text-xs
-            font-semibold text-white shadow-lg shadow-cyan-500/20 transition-all hover:bg-cyan-500"
+          class="rounded-full border border-cyan-400 bg-cyan-500/80 px-4 py-1.5 text-xs font-semibold text-white shadow-lg shadow-cyan-500/20 transition-all hover:bg-cyan-500"
         >
           {{ $t("ui.characterCard.join") }}
         </button>
@@ -121,8 +111,7 @@
         <button
           v-else
           disabled
-          class="cursor-not-allowed rounded-full border border-cyan-400/50 bg-cyan-500/50 px-4
-            py-1.5 text-xs font-semibold text-cyan-200 shadow-lg transition-all"
+          class="cursor-not-allowed rounded-full border border-cyan-400/50 bg-cyan-500/50 px-4 py-1.5 text-xs font-semibold text-cyan-200 shadow-lg transition-all"
         >
           {{ $t("ui.characterCard.inScene") }}
         </button>
@@ -136,8 +125,7 @@
               ? 'cursor-not-allowed border-white/10 bg-white/5 text-white/30'
               : isSelected()
                 ? 'border-emerald-400 bg-emerald-500/80 text-white shadow-emerald-500/20'
-                : `border-indigo-500 bg-indigo-600/80 text-white shadow-indigo-500/20
-                  hover:bg-indigo-500`,
+                : `border-indigo-500 bg-indigo-600/80 text-white shadow-indigo-500/20 hover:bg-indigo-500`,
           ]"
         >
           {{ isSelected() ? $t("ui.characterCard.selected") : $t("ui.characterCard.select") }}
@@ -153,8 +141,7 @@
       @click="closeDetailModal"
     >
       <div
-        class="relative flex max-h-[85dvh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl
-          border border-white/20 bg-slate-900/40 shadow-2xl backdrop-blur-2xl"
+        class="relative flex max-h-[85dvh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-white/20 bg-slate-900/40 shadow-2xl backdrop-blur-2xl"
         @click.stop
       >
         <div class="flex items-center gap-4 border-b border-white/10 bg-white/10 p-6">
@@ -170,8 +157,7 @@
           </div>
           <button
             @click="closeDetailModal"
-            class="rounded-full p-2 text-white/50 transition-colors hover:bg-red-500/20
-              hover:text-white"
+            class="rounded-full p-2 text-white/50 transition-colors hover:bg-red-500/20 hover:text-white"
           >
             <Icon icon="close" class="h-6 w-6" />
           </button>
@@ -230,8 +216,7 @@
                 >
                   <img
                     :src="cloth.avatar"
-                    class="h-full w-full object-cover transition-transform duration-300
-                      group-hover:scale-105"
+                    class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                   />
                   <div
                     v-if="isClothesSelected(id, cloth.title)"
@@ -263,254 +248,260 @@
 </template>
 
 <script setup lang="ts">
-  import { computed, ref } from "vue";
-  import { useI18n } from "vue-i18n";
-  import { invoke } from "@tauri-apps/api/core";
-  import { Icon } from "../../base";
-  import SettingsCharacterInfo from "@/components/settings/pages/SettingsCharacterInfo.vue";
-  import RoleExportMenu from "@/components/ui/RoleExportMenu.vue";
-  import PluginTag from "@/components/ui/PluginTag.vue";
-  import {
-    selectCharacter as selectCharacterApi,
-    selectClothes as selectClothesApi,
-  } from "@/api/services/character";
-  import { useGameStore } from "@/stores/modules/game";
-  import { applyWebInitData } from "@/stores/modules/game/actions";
-  import { useDialogStore } from "@/stores/modules/ui/dialog";
-  import { useUIStore } from "@/stores/modules/ui/ui";
-  import { possessEntity } from "@/api/services/identity";
-  import { Settings } from "lucide-vue-next";
-  import { Cat, Check, Loader2, Play } from "lucide-vue-next";
-  import type { Clothes } from "@/types";
+import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
+import { invoke } from "@tauri-apps/api/core";
+import { Icon } from "../../base";
+import SettingsCharacterInfo from "@/components/settings/pages/SettingsCharacterInfo.vue";
+import RoleExportMenu from "@/components/ui/RoleExportMenu.vue";
+import PluginTag from "@/components/ui/PluginTag.vue";
+import {
+  selectCharacter as selectCharacterApi,
+  selectClothes as selectClothesApi,
+} from "@/api/services/character";
+import { useGameStore } from "@/stores/modules/game";
+import { applyWebInitData } from "@/stores/modules/game/actions";
+import { eventQueue } from "@/core/events/event-queue";
+import { useDialogStore } from "@/stores/modules/ui/dialog";
+import { useUIStore } from "@/stores/modules/ui/ui";
+import { possessEntity } from "@/api/services/identity";
+import { Settings } from "lucide-vue-next";
+import { Cat, Check, Loader2, Play } from "lucide-vue-next";
+import type { Clothes } from "@/types";
 
-  interface CharacterProps {
-    id: number;
-    avatar?: string;
-    name?: string;
-    title?: string;
-    subName?: string;
-    info?: string;
-    clothes?: Clothes[];
-    resourceFolder?: string;
-    /** 来源："game" 或提供该角色的插件 id。 */
-    source?: string | null;
-    /** 是否展示附身入口（仅设置「角色」Tab 传入 true） */
-    showPossess?: boolean;
-    /** 非空字符串表示禁用附身并作为悬浮提示（剧本进行中 / 不可接管的当前对话对象） */
-    possessDisabledReason?: string;
-    /** 非空字符串表示禁用「选择」并作为悬浮提示（例如该角色正被玩家扮演） */
-    selectDisabledReason?: string;
-    /** 非空字符串表示禁用「退场」并作为悬浮提示（例如该角色正被玩家扮演） */
-    leaveDisabledReason?: string;
-  }
+interface CharacterProps {
+  id: number;
+  avatar?: string;
+  name?: string;
+  title?: string;
+  subName?: string;
+  info?: string;
+  clothes?: Clothes[];
+  resourceFolder?: string;
+  /** 来源："game" 或提供该角色的插件 id。 */
+  source?: string | null;
+  /** 是否展示附身入口（仅设置「角色」Tab 传入 true） */
+  showPossess?: boolean;
+  /** 非空字符串表示禁用附身并作为悬浮提示（剧本进行中 / 不可接管的当前对话对象） */
+  possessDisabledReason?: string;
+  /** 非空字符串表示禁用「选择」并作为悬浮提示（例如该角色正被玩家扮演） */
+  selectDisabledReason?: string;
+  /** 非空字符串表示禁用「退场」并作为悬浮提示（例如该角色正被玩家扮演） */
+  leaveDisabledReason?: string;
+}
 
-  const props = withDefaults(defineProps<CharacterProps>(), {
-    avatar: "",
-    name: "Unknown",
-    info: "",
-    clothes: () => [],
-    resourceFolder: "",
-    showPossess: false,
-    possessDisabledReason: "",
-    selectDisabledReason: "",
-    leaveDisabledReason: "",
-  });
+const props = withDefaults(defineProps<CharacterProps>(), {
+  avatar: "",
+  name: "Unknown",
+  info: "",
+  clothes: () => [],
+  resourceFolder: "",
+  showPossess: false,
+  possessDisabledReason: "",
+  selectDisabledReason: "",
+  leaveDisabledReason: "",
+});
 
-  const emit = defineEmits(["saved"]);
+const emit = defineEmits(["saved"]);
 
-  // 状态管理
-  const isDetailVisible = ref(false);
-  const isSettingsModalVisible = ref(false);
-  /** 附身请求进行中（按钮 loading，避免重复点击） */
-  const possessing = ref(false);
+// 状态管理
+const isDetailVisible = ref(false);
+const isSettingsModalVisible = ref(false);
+/** 附身请求进行中（按钮 loading，避免重复点击） */
+const possessing = ref(false);
 
-  const { t } = useI18n();
-  const gameStore = useGameStore();
-  const dialogStore = useDialogStore();
-  const uiStore = useUIStore();
+const { t } = useI18n();
+const gameStore = useGameStore();
+const dialogStore = useDialogStore();
+const uiStore = useUIStore();
 
-  // 逻辑函数
-  const isSelected = () => gameStore.mainRoleId === props.id;
-  const isClothesSelected = (role_id: number, clothes_name: string) =>
-    gameStore.getGameRole(role_id)?.clothesName === clothes_name;
+// 逻辑函数
+const isSelected = () => gameStore.mainRoleId === props.id;
+const isClothesSelected = (role_id: number, clothes_name: string) =>
+  gameStore.getGameRole(role_id)?.clothesName === clothes_name;
 
-  /** 当前被附身角色以 store 为准（identity:possessed 广播即时同步） */
-  const isPossessed = () => gameStore.possessedRoleId === props.id;
+/** 当前被附身角色以 store 为准（identity:possessed 广播即时同步） */
+const isPossessed = () => gameStore.possessedRoleId === props.id;
 
-  const possessDisabled = computed(
-    () => !!props.possessDisabledReason || isPossessed() || possessing.value
-  );
+const possessDisabled = computed(
+  () => !!props.possessDisabledReason || isPossessed() || possessing.value,
+);
 
-  /**
-   * 「选择」「退场」的置灰文案：外部传入优先，未传时按附身态兜底。
-   * 附身期间切换主角色会让当前扮演身份失配，故卡片自身也兜底禁用，不依赖调用方记得传值。
-   */
-  const selectDisabledTitle = computed(() =>
+/**
+ * 「选择」「退场」的置灰文案：外部传入优先，未传时按附身态兜底。
+ * 附身期间切换主角色会让当前扮演身份失配，故卡片自身也兜底禁用，不依赖调用方记得传值。
+ */
+const selectDisabledTitle = computed(
+  () =>
     props.selectDisabledReason ||
-    (isPossessed() ? t("ui.characterCard.selectDisabledPossessed") : "")
-  );
-  const selectDisabled = computed(() => !!selectDisabledTitle.value);
+    (isPossessed() ? t("ui.characterCard.selectDisabledPossessed") : ""),
+);
+const selectDisabled = computed(() => !!selectDisabledTitle.value);
 
-  const leaveDisabledTitle = computed(() =>
+const leaveDisabledTitle = computed(
+  () =>
     props.leaveDisabledReason ||
-    (isPossessed() ? t("ui.characterCard.leaveDisabledPossessed") : "")
-  );
-  const leaveDisabled = computed(() => !!leaveDisabledTitle.value);
+    (isPossessed() ? t("ui.characterCard.leaveDisabledPossessed") : ""),
+);
+const leaveDisabled = computed(() => !!leaveDisabledTitle.value);
 
-  /** 附身该 AI 角色；成功/失败走既有全局通知 */
-  const possess = async () => {
-    if (possessDisabled.value) return;
-    possessing.value = true;
-    try {
-      const name = await possessEntity(props.id);
-      // 立即回写本地态，不必等 identity:possessed 广播到达
-      gameStore.possessedRoleId = props.id;
-      gameStore.userName = name;
-      uiStore.showNotification({
-        type: "success",
-        title: t("game.dialog.possessSuccessTitle"),
-        message: t("game.dialog.possessSuccess", { name }),
-        duration: 2000,
-        skipTipsCheck: true,
-      });
-    } catch (error) {
-      uiStore.showNotification({
-        type: "warning",
-        title: t("game.dialog.possessFailedTitle"),
-        message: String(error),
-        skipTipsCheck: true,
-      });
-    } finally {
-      possessing.value = false;
-    }
-  };
+/** 附身该 AI 角色；成功/失败走既有全局通知 */
+const possess = async () => {
+  if (possessDisabled.value) return;
+  possessing.value = true;
+  try {
+    const name = await possessEntity(props.id);
+    // 立即回写本地态，不必等 identity:possessed 广播到达
+    gameStore.possessedRoleId = props.id;
+    gameStore.userName = name;
+    uiStore.showNotification({
+      type: "success",
+      title: t("game.dialog.possessSuccessTitle"),
+      message: t("game.dialog.possessSuccess", { name }),
+      duration: 2000,
+      skipTipsCheck: true,
+    });
+  } catch (error) {
+    uiStore.showNotification({
+      type: "warning",
+      title: t("game.dialog.possessFailedTitle"),
+      message: String(error),
+      skipTipsCheck: true,
+    });
+  } finally {
+    possessing.value = false;
+  }
+};
 
-  const showDetailModal = () => (isDetailVisible.value = true);
-  const closeDetailModal = () => (isDetailVisible.value = false);
+const showDetailModal = () => (isDetailVisible.value = true);
+const closeDetailModal = () => (isDetailVisible.value = false);
 
-  const selectCharacter = async () => {
-    if (selectDisabled.value) return;
-    const confirmed = await dialogStore.confirm(t("ui.characterCard.confirmSwitch"));
-    if (!confirmed) return;
+const selectCharacter = async () => {
+  if (selectDisabled.value) return;
+  const confirmed = await dialogStore.confirm(t("ui.characterCard.confirmSwitch"));
+  if (!confirmed) return;
 
-    try {
-      const data = await selectCharacterApi(props.id);
-      applyWebInitData(gameStore.$state, data);
-    } catch (error) {
-      console.error("切换角色失败:", error);
-    }
-  };
+  try {
+    const data = await selectCharacterApi(props.id);
+    applyWebInitData(gameStore.$state, data);
+    // 切换角色后丢弃旧角色残留事件队列（防止未说完的回复串进新角色对话，issue #796）
+    eventQueue.clear();
+    eventQueue.resume();
+  } catch (error) {
+    console.error("切换角色失败:", error);
+  }
+};
 
-  const selectClothes = async (role_id: number, clothes_name: string) => {
-    try {
-      // 调用后端API选择衣服
-      const response = await selectClothesApi(role_id, clothes_name);
+const selectClothes = async (role_id: number, clothes_name: string) => {
+  try {
+    // 调用后端API选择衣服
+    const response = await selectClothesApi(role_id, clothes_name);
 
-      if (response.success) {
-        // 更新本地状态
-        const role = gameStore.getGameRole(role_id);
-        if (role) {
-          role.clothesName = clothes_name;
-        }
+    if (response.success) {
+      // 更新本地状态
+      const role = gameStore.getGameRole(role_id);
+      if (role) {
+        role.clothesName = clothes_name;
       }
-    } catch (error) {
-      console.error("选择衣服失败:", error);
-      // 可选：显示错误提示
     }
-  };
+  } catch (error) {
+    console.error("选择衣服失败:", error);
+    // 可选：显示错误提示
+  }
+};
 
-  // 多人对话：将角色加入场景
-  const isInScene = () => gameStore.presentRoleIds.includes(props.id);
+// 多人对话：将角色加入场景
+const isInScene = () => gameStore.presentRoleIds.includes(props.id);
 
-  const joinScene = async () => {
-    if (isInScene()) return;
-    try {
-      const result = (await invoke("add_role_to_scene", { roleId: props.id })) as {
-        success: boolean;
-        message: string;
-      };
-      if (result.success) {
-        gameStore.presentRoleIds.push(props.id);
-        // 确保角色信息已加载
-        await gameStore.getOrCreateGameRole(props.id);
-        return;
-      }
-      // 后端拒绝（如已达场景人数上限）时经全局通知告知，避免只留控制台日志
-      uiStore.showNotification({
-        type: "warning",
-        title: t("ui.characterCard.joinSceneFailed"),
-        message: result.message,
-        skipTipsCheck: true,
-      });
-    } catch (error) {
-      uiStore.showNotification({
-        type: "warning",
-        title: t("ui.characterCard.joinSceneFailed"),
-        message: String(error),
-        skipTipsCheck: true,
-      });
+const joinScene = async () => {
+  if (isInScene()) return;
+  try {
+    const result = (await invoke("add_role_to_scene", { roleId: props.id })) as {
+      success: boolean;
+      message: string;
+    };
+    if (result.success) {
+      gameStore.presentRoleIds.push(props.id);
+      // 确保角色信息已加载
+      await gameStore.getOrCreateGameRole(props.id);
+      return;
     }
-  };
+    // 后端拒绝（如已达场景人数上限）时经全局通知告知，避免只留控制台日志
+    uiStore.showNotification({
+      type: "warning",
+      title: t("ui.characterCard.joinSceneFailed"),
+      message: result.message,
+      skipTipsCheck: true,
+    });
+  } catch (error) {
+    uiStore.showNotification({
+      type: "warning",
+      title: t("ui.characterCard.joinSceneFailed"),
+      message: String(error),
+      skipTipsCheck: true,
+    });
+  }
+};
 
-  // 多人对话：将角色移出场景
-  const leaveScene = async () => {
-    if (!isInScene()) return;
-    try {
-      const result = (await invoke("remove_role_from_scene", { roleId: props.id })) as {
-        success: boolean;
-        message: string;
-      };
-      if (result.success) {
-        gameStore.presentRoleIds = gameStore.presentRoleIds.filter((id) => id !== props.id);
-      }
-      console.log("[CharacterCard] 角色退场:", result.message);
-    } catch (error) {
-      console.error("[CharacterCard] 角色退场失败:", error);
+// 多人对话：将角色移出场景
+const leaveScene = async () => {
+  if (!isInScene()) return;
+  try {
+    const result = (await invoke("remove_role_from_scene", { roleId: props.id })) as {
+      success: boolean;
+      message: string;
+    };
+    if (result.success) {
+      gameStore.presentRoleIds = gameStore.presentRoleIds.filter((id) => id !== props.id);
     }
-  };
+    console.log("[CharacterCard] 角色退场:", result.message);
+  } catch (error) {
+    console.error("[CharacterCard] 角色退场失败:", error);
+  }
+};
 
-  const openSettingsModal = () => (isSettingsModalVisible.value = true);
-  const closeSettingsModal = () => (isSettingsModalVisible.value = false);
-  const handleSettingsSaved = () => emit("saved");
+const openSettingsModal = () => (isSettingsModalVisible.value = true);
+const closeSettingsModal = () => (isSettingsModalVisible.value = false);
+const handleSettingsSaved = () => emit("saved");
 </script>
 
 <style scoped>
-  /* 仅保留必要的动画定义，其余全部由 Tailwind 处理 */
-  .modal-enter-active,
-  .modal-leave-active {
-    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  .modal-enter-from,
-  .modal-leave-to {
-    opacity: 0;
-    transform: scale(0.95) translateY(10px);
-  }
+/* 仅保留必要的动画定义，其余全部由 Tailwind 处理 */
+.modal-enter-active,
+.modal-leave-active {
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+  transform: scale(0.95) translateY(10px);
+}
 
-  /* 隐藏滚动条但允许滚动 */
-  .overflow-x-auto::-webkit-scrollbar,
-  .overflow-y-auto::-webkit-scrollbar {
-    display: none;
-  }
+/* 隐藏滚动条但允许滚动 */
+.overflow-x-auto::-webkit-scrollbar,
+.overflow-y-auto::-webkit-scrollbar {
+  display: none;
+}
 
-  /* 服装横向列表保留可见滚动条，方便拖动查看后续服装。 */
-  .clothes-scroll {
-    padding-bottom: 8px;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(129, 140, 248, 0.55) rgba(255, 255, 255, 0.06);
-  }
-  .clothes-scroll::-webkit-scrollbar {
-    display: block;
-    height: 8px;
-  }
-  .clothes-scroll::-webkit-scrollbar-track {
-    border-radius: 20px;
-    background: rgba(255, 255, 255, 0.06);
-  }
-  .clothes-scroll::-webkit-scrollbar-thumb {
-    border-radius: 20px;
-    background-color: rgba(129, 140, 248, 0.55);
-  }
-  .clothes-scroll::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(129, 140, 248, 0.8);
-  }
+/* 服装横向列表保留可见滚动条，方便拖动查看后续服装。 */
+.clothes-scroll {
+  padding-bottom: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(129, 140, 248, 0.55) rgba(255, 255, 255, 0.06);
+}
+.clothes-scroll::-webkit-scrollbar {
+  display: block;
+  height: 8px;
+}
+.clothes-scroll::-webkit-scrollbar-track {
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.clothes-scroll::-webkit-scrollbar-thumb {
+  border-radius: 20px;
+  background-color: rgba(129, 140, 248, 0.55);
+}
+.clothes-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(129, 140, 248, 0.8);
+}
 </style>

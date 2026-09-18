@@ -171,6 +171,39 @@
       class="group relative mt-4 overflow-hidden rounded-xl border p-6 shadow-sm transition-colors duration-300"
       :class="isDarkMode ? 'border-slate-700 bg-slate-800/50' : 'border-slate-200 bg-white'"
     >
+      <h3
+        class="mb-4 flex items-center gap-2 text-lg font-bold"
+        :class="isDarkMode ? 'text-slate-200' : 'text-slate-800'"
+      >
+        <MessageSquare class="h-5 w-5 text-sky-500" />
+        {{ $t("pet.petTab.bubbleSideTitle") }}
+      </h3>
+      <div class="flex flex-wrap items-center gap-3">
+        <button
+          v-for="opt in bubbleSideOptions"
+          :key="opt.value"
+          type="button"
+          @click="emit('updateBubbleSide', opt.value)"
+          class="rounded-lg border px-4 py-2 text-sm font-medium transition-all duration-200"
+          :class="[
+            petBubbleSide === opt.value
+              ? isDarkMode
+                ? 'border-sky-500 bg-sky-500/20 text-sky-400'
+                : 'border-sky-500 bg-sky-500 text-white shadow-md'
+              : isDarkMode
+                ? 'border-slate-600 bg-transparent text-slate-400 hover:border-slate-500 hover:text-slate-300'
+                : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-slate-100',
+          ]"
+        >
+          {{ opt.label }}
+        </button>
+      </div>
+    </div>
+
+    <div
+      class="group relative mt-4 overflow-hidden rounded-xl border p-6 shadow-sm transition-colors duration-300"
+      :class="isDarkMode ? 'border-slate-700 bg-slate-800/50' : 'border-slate-200 bg-white'"
+    >
       <Gauge
         class="absolute -right-4 -bottom-4 h-32 w-32 -rotate-12 opacity-10 transition-all duration-300 group-hover:scale-110"
         :class="isDarkMode ? 'text-slate-700' : 'text-slate-300'"
@@ -378,6 +411,7 @@ import {
 import { useUIStore } from "../../../../stores/modules/ui/ui";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { PARTICLE_EFFECTS } from "@/components/game/standard/particles";
+import type { BubbleSide } from "@/stores/modules/settings";
 
 const props = defineProps<{
   isDarkMode: boolean;
@@ -387,6 +421,8 @@ const props = defineProps<{
   PET_SCALE_MAX: number;
   /** Live2D 渲染帧率上限（0 = 不限制） */
   live2dFps: number;
+  /** 气泡/通知位置：above / below / auto */
+  petBubbleSide: BubbleSide;
 }>();
 
 const emit = defineEmits<{
@@ -396,6 +432,7 @@ const emit = defineEmits<{
   resetVolume: [];
   updateLive2dFps: [value: number];
   resetLive2dFps: [];
+  updateBubbleSide: [value: BubbleSide];
 }>();
 
 const uiStore = useUIStore();
@@ -453,6 +490,13 @@ const onVolumeInput = (event: Event) => {
   const target = event.target as HTMLInputElement;
   emit("updateVolume", Number(target.value));
 };
+
+// ===== 气泡位置 =====
+const bubbleSideOptions = computed(() => [
+  { label: t("pet.petTab.bubbleSideAuto"), value: "auto" as const },
+  { label: t("pet.petTab.bubbleSideAbove"), value: "above" as const },
+  { label: t("pet.petTab.bubbleSideBelow"), value: "below" as const },
+]);
 
 // ===== Live2D 帧率 =====
 const FPS_PRESETS = [30, 60] as const;

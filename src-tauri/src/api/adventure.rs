@@ -11,9 +11,6 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::AppState;
 use crate::adventures::manager::AdventureManager;
 use crate::adventures::trigger::{self, UnlockedAdventureInfo};
-use crate::ai_service::game_system::script_engine::ScriptManager;
-use crate::ai_service::game_system::script_engine::events::ScriptContext;
-use crate::ai_service::types::PLAYER_ROLE_ID;
 
 // ============================================================
 // Response types
@@ -180,73 +177,22 @@ pub async fn start_adventure(app: AppHandle, adventure_folder: String) -> Result
         return Err("冒险尚未解锁，无法启动".to_string());
     }
 
-    // Find the script and extract needed data while holding AIService lock
-    let (script, game_status, config, is_running) = {
+    // 与剧本共用同一道互斥闸：附身态或已有 run 在跑时直接拒绝
+    crate::api::script::ensure_script_start_allowed(&app, "冒险").await?;
+
+    // 取出剧本后即结束对 state 的借用，随后把 app 交给共用的后台执行入口
+    let script = {
         let service = state.ai_service.lock().await;
-        let script = service
+        service
             .script_manager
             .all_scripts
             .values()
             .find(|s| s.folder_key == adventure_folder)
             .ok_or_else(|| format!("冒险不存在: '{}'", adventure_folder))?
-            .clone();
-        let game_status = service.game_status.clone();
-        // 带附身启动冒险会让玩家身份与冒险场次互相污染，先要求解除扮演
-        {
-            let gs = game_status.lock().await;
-            if gs.possessed_role_id != PLAYER_ROLE_ID {
-                return Err("请先解除扮演（切回默认身份）后再开始冒险".to_string());
-            }
-        }
-        let config = service.config.clone();
-        let is_running = service.script_manager.is_running.clone();
-        // 同一时刻只允许一个剧本/冒险占用引擎：重复启动会让两个 run 争抢同一份
-        // script_status 与输入通道，前端也收不到明确的结束信号
-        if is_running.load(Ordering::SeqCst) {
-            return Err("已有剧本或冒险正在进行中".to_string());
-        }
-        (script, game_status, config, is_running)
+            .clone()
     };
 
-    let ai_service = state.ai_service.clone();
-    let channels = state.script_channels.clone();
-    let db = state.db.clone();
-    let data_dir = state.ai_service.lock().await.data_dir.clone();
-    let llm = crate::ai_service::llm::slot_snapshot(&state.chat.llm).await;
-    let achievement_manager = state.achievement_manager.clone();
-
-    tokio::spawn(async move {
-        let mut ctx = ScriptContext {
-            db: &db,
-            data_dir: &data_dir,
-            app: &app,
-            game_status,
-            config: &config,
-            llm: llm.as_ref(),
-            channels,
-            is_preview: false,
-        };
-
-        match ScriptManager::execute_script(&script, &mut ctx, &is_running).await {
-            Ok(()) => {
-                // Handle adventure completion (achievements, chained unlocks)
-                if script.adventure.is_adventure {
-                    handle_adventure_completion(
-                        &db,
-                        &achievement_manager,
-                        &app,
-                        &ai_service,
-                        &script.folder_key,
-                        &script.adventure.completion_achievements,
-                        &script.name,
-                    )
-                    .await;
-                }
-                tracing::info!("[AdventureAPI] 冒险执行完成")
-            },
-            Err(e) => tracing::error!("[AdventureAPI] 冒险执行错误: {}", e),
-        }
-    });
+    crate::api::script::spawn_script_execution(app, script).await;
 
     Ok(())
 }

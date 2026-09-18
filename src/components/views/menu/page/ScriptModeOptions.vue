@@ -43,63 +43,63 @@
 </template>
 
 <script setup lang="ts">
-  import { computed, ref } from "vue";
-  import { StartItem, StartLine, StartList } from "../base";
-  import PluginTag from "@/components/ui/PluginTag.vue";
-  import { useRouter } from "vue-router";
-  import { useI18n } from "vue-i18n";
-  import { type ScriptSummary, startScript } from "@/api/services/script-info";
-  import { useGameStore } from "@/stores/modules/game";
-  import { useUIStore } from "@/stores/modules/ui/ui";
+import { computed, ref } from "vue";
+import { StartItem, StartLine, StartList } from "../base";
+import PluginTag from "@/components/ui/PluginTag.vue";
+import { useRouter } from "vue-router";
+import { useI18n } from "vue-i18n";
+import { type ScriptSummary, startScript } from "@/api/services/script-info";
+import { useGameStore } from "@/stores/modules/game";
+import { useUIStore } from "@/stores/modules/ui/ui";
 
-  const emit = defineEmits<{
-    (e: "back"): void;
-  }>();
+const emit = defineEmits<{
+  (e: "back"): void;
+}>();
 
-  const props = defineProps({
-    scripts: {
-      type: Array as () => ScriptSummary[],
-      default: [],
-    },
-  });
+const props = defineProps({
+  scripts: {
+    type: Array as () => ScriptSummary[],
+    default: [],
+  },
+});
 
-  const router = useRouter();
-  const gameStore = useGameStore();
-  const uiStore = useUIStore();
-  const { t } = useI18n();
+const router = useRouter();
+const gameStore = useGameStore();
+const uiStore = useUIStore();
+const { t } = useI18n();
 
-  const currentPage = ref(1);
-  const pageSize = 3;
+const currentPage = ref(1);
+const pageSize = 3;
 
-  /** 附身中禁止开始剧本：以扮演身份进剧本会让身份错乱，与后端校验同源 */
-  const isPossessed = computed(() => gameStore.possessedRoleId !== 0);
+/** 附身中禁止开始剧本：以扮演身份进剧本会让身份错乱，与后端校验同源 */
+const isPossessed = computed(() => gameStore.possessedRoleId !== 0);
 
-  const selectScript = async (script: ScriptSummary) => {
-    if (isPossessed.value) return;
-    try {
-      // 先等后端受理：附身拒绝在 spawn 前同步返回 Err，此时绝不可进入剧本模式
-      await startScript(script.script_name);
-    } catch (error) {
-      uiStore.showNotification({
-        type: "warning",
-        title: t("ui.characterCard.startFailedTitle"),
-        message: String(error),
-        skipTipsCheck: true,
-      });
-      return;
-    }
+const selectScript = async (script: ScriptSummary) => {
+  if (isPossessed.value) return;
+  try {
+    // 先等后端受理：附身/并发拒绝会在引擎起跑前同步返回 Err，此时绝不可进入剧本模式
+    await startScript(script.script_name);
+  } catch (error) {
+    uiStore.showNotification({
+      type: "warning",
+      title: t("ui.characterCard.startFailedTitle"),
+      message: String(error),
+      skipTipsCheck: true,
+    });
+    return;
+  }
 
-    await router.push("/chat");
-    gameStore.enterStoryMode(script.script_name);
-  };
+  await router.push("/chat");
+  gameStore.enterStoryMode(script.script_name);
+};
 
-  const totalPages = computed(() => {
-    return Math.ceil(props.scripts.length / pageSize);
-  });
+const totalPages = computed(() => {
+  return Math.ceil(props.scripts.length / pageSize);
+});
 
-  const currentPageScripts = computed(() => {
-    const start = (currentPage.value - 1) * pageSize;
-    const end = start + pageSize;
-    return props.scripts.slice(start, end);
-  });
+const currentPageScripts = computed(() => {
+  const start = (currentPage.value - 1) * pageSize;
+  const end = start + pageSize;
+  return props.scripts.slice(start, end);
+});
 </script>
