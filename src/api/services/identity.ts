@@ -3,9 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 /** 实体人设扩展，对应 Rust `RoleProfile`（role.profile_json） */
 export interface RoleProfile {
   subtitle: string;
-  prompt: string;
   info: string;
-  speech_examples: string;
   location_id: string | null;
   home_location_id: string | null;
   attributes: Record<string, unknown>;

@@ -582,13 +582,10 @@ export default {
       name: "名前",
       namePlaceholder: "例：小林",
       subtitle: "サブタイトル",
-      subtitlePlaceholder: "例：普通の高校生",
-      prompt: "人物設定プロンプト",
-      promptPlaceholder: "このアイデンティティの性格・背景・振る舞いを記述",
+      subtitlePlaceholder: "名前の横に表示されます",
       info: "紹介",
-      infoPlaceholder: "任意：一言紹介",
-      speechExamples: "話し方",
-      speechExamplesPlaceholder: "任意：AI が真似するためのセリフ例",
+      infoPlaceholder:
+        "AI にあなたの身分・背景・性格・好み、または特定のキャラとの関係などを伝えます",
     },
     actions: {
       save: "保存",

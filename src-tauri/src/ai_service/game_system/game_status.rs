@@ -196,7 +196,6 @@ impl GameStatus {
             name
         };
         self.player.user_subtitle = subtitle;
-        self.player.user_prompt = profile.prompt;
         Ok(())
     }
 

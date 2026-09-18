@@ -600,13 +600,10 @@ export default {
       name: "Name",
       namePlaceholder: "e.g. Kobayashi",
       subtitle: "Subtitle",
-      subtitlePlaceholder: "e.g. An ordinary high-school student",
-      prompt: "Persona Prompt",
-      promptPlaceholder: "Describe this identity's personality, background and behavior",
-      info: "Bio",
-      infoPlaceholder: "Optional: a one-line introduction",
-      speechExamples: "Speech Style",
-      speechExamplesPlaceholder: "Optional: sample lines for the AI to imitate",
+      subtitlePlaceholder: "It appears next to your name",
+      info: "Introduction",
+      infoPlaceholder:
+        "Tell the AI about your identity, background, personality, preferences, or your relationship with a character",
     },
     actions: {
       save: "Save",

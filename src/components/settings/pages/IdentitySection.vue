@@ -163,40 +163,14 @@
       </div>
 
       <div class="flex flex-col gap-2">
-        <label class="text-[13px] font-medium text-white/60" for="identity-prompt">
-          {{ $t("settings.identity.fields.prompt") }}
-        </label>
-        <textarea
-          id="identity-prompt"
-          v-model="form.prompt"
-          rows="6"
-          :placeholder="$t('settings.identity.fields.promptPlaceholder')"
-          class="form-control resize-y rounded-xl border border-white/10 bg-black/20 px-3.5 py-2.5 font-mono text-sm leading-relaxed text-white transition-all duration-200 outline-none"
-        ></textarea>
-      </div>
-
-      <div class="flex flex-col gap-2">
         <label class="text-[13px] font-medium text-white/60" for="identity-info">
           {{ $t("settings.identity.fields.info") }}
         </label>
         <textarea
           id="identity-info"
           v-model="form.info"
-          rows="3"
+          rows="5"
           :placeholder="$t('settings.identity.fields.infoPlaceholder')"
-          class="form-control resize-y rounded-xl border border-white/10 bg-black/20 px-3.5 py-2.5 text-sm leading-relaxed text-white transition-all duration-200 outline-none"
-        ></textarea>
-      </div>
-
-      <div class="flex flex-col gap-2">
-        <label class="text-[13px] font-medium text-white/60" for="identity-speech">
-          {{ $t("settings.identity.fields.speechExamples") }}
-        </label>
-        <textarea
-          id="identity-speech"
-          v-model="form.speech_examples"
-          rows="4"
-          :placeholder="$t('settings.identity.fields.speechExamplesPlaceholder')"
           class="form-control resize-y rounded-xl border border-white/10 bg-black/20 px-3.5 py-2.5 text-sm leading-relaxed text-white transition-all duration-200 outline-none"
         ></textarea>
       </div>
@@ -279,9 +253,7 @@ const editingProfile = ref<RoleProfile | null>(null);
 const form = reactive({
   name: "",
   subtitle: "",
-  prompt: "",
   info: "",
-  speech_examples: "",
 });
 
 /** 剧本/试玩进行中禁止附身（与后端 gs.script_status 校验同源） */
@@ -300,9 +272,7 @@ const possessBlockedReason = (item: IdentityInfo): string => {
 const resetForm = () => {
   form.name = "";
   form.subtitle = "";
-  form.prompt = "";
   form.info = "";
-  form.speech_examples = "";
 };
 
 const loadIdentities = async () => {
@@ -373,9 +343,7 @@ const startEdit = (item: IdentityInfo) => {
   editingProfile.value = item.profile;
   form.name = item.name;
   form.subtitle = item.profile.subtitle;
-  form.prompt = item.profile.prompt;
   form.info = item.profile.info;
-  form.speech_examples = item.profile.speech_examples;
   editorOpen.value = true;
 };
 
@@ -390,9 +358,7 @@ const closeEditor = () => {
 const buildProfile = (): RoleProfile => {
   const base: RoleProfile = editingProfile.value ?? {
     subtitle: "",
-    prompt: "",
     info: "",
-    speech_examples: "",
     location_id: null,
     home_location_id: null,
     attributes: {},
@@ -400,9 +366,7 @@ const buildProfile = (): RoleProfile => {
   return {
     ...base,
     subtitle: form.subtitle.trim(),
-    prompt: form.prompt.trim(),
     info: form.info.trim(),
-    speech_examples: form.speech_examples.trim(),
   };
 };
 

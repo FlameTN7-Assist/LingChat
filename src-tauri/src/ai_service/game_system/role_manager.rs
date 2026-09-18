@@ -755,7 +755,8 @@ pub fn user_identity_settings(role: &RoleModel, profile: &RoleProfile) -> Charac
     CharacterSettings {
         ai_name: role.name.clone(),
         ai_subtitle: Some(profile.subtitle.clone()),
-        system_prompt: Some(profile.prompt.clone()),
+        // 身份只有「介绍」一个描述字段，它同时充当 system 人设材料与列表/上帝视角用的简介
+        system_prompt: Some(profile.info.clone()),
         info: Some(profile.info.clone()),
         character_id: Some(role.id),
         ..Default::default()

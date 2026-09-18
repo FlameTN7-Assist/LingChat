@@ -662,15 +662,10 @@ pub struct RoleProfile {
     /// 副标题/称号
     #[serde(default)]
     pub subtitle: String,
-    /// 人设设定文本（该实体被 AI 控制时作为其 system 人设材料；被人类附身时作为他者认知材料）
-    #[serde(default)]
-    pub prompt: String,
-    /// 一句话简介
+    /// 身份介绍：身份的完整描述，同时充当该实体的人设材料（AI 控制时的 system 人设）
+    /// 与他人对它的认知简介，因此不再区分「人设提示词」与「简介」两个字段
     #[serde(default)]
     pub info: String,
-    /// 说话风格示例
-    #[serde(default)]
-    pub speech_examples: String,
     // ── 空间玩法预留，本期不写任何逻辑 ──
     #[serde(default)]
     pub location_id: Option<String>,

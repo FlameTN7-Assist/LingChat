@@ -671,8 +671,40 @@ mod tests {
             .unwrap();
         let parsed = RoleRepo::get_role_profile(&db, 1).await.unwrap();
         assert_eq!(parsed.subtitle, "称号");
-        assert_eq!(parsed.prompt, "");
         assert!(parsed.location_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn player_identity_crud_roundtrip() {
+        let db = test_db().await;
+        let profile = RoleProfile {
+            subtitle: "小名".into(),
+            info: "温柔的人".into(),
+            ..Default::default()
+        };
+
+        let id = RoleRepo::create_player_identity(&db, "小明", &profile).await.unwrap();
+        assert!(id > 0);
+
+        let listed = RoleRepo::list_player_identities(&db).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].0.id, id);
+        assert_eq!(listed[0].0.role_type, RoleType::User);
+        assert!(listed[0].0.script_key.is_none());
+        assert!(listed[0].0.resource_folder.is_none());
+        assert_eq!(listed[0].1, profile);
+
+        let mut updated = profile.clone();
+        updated.subtitle = "新称号".into();
+        RoleRepo::update_player_identity(&db, id, "小红", &updated).await.unwrap();
+        let role = RoleRepo::get_role_by_id(&db, id).await.unwrap().unwrap();
+        assert_eq!(role.name, "小红");
+        assert_eq!(RoleRepo::get_role_profile(&db, id).await.unwrap(), updated);
+
+        assert!(RoleRepo::delete_player_identity(&db, id).await.unwrap());
+        assert!(RoleRepo::get_role_by_id(&db, id).await.unwrap().is_none());
+        // 重复删除返回 false 而非报错
+        assert!(!RoleRepo::delete_player_identity(&db, id).await.unwrap());
     }
 
     #[tokio::test]
@@ -684,7 +716,7 @@ mod tests {
         // 改名保护低于删除保护：id=0 是系统保护行（不可删），但作为默认身份必须可改名/改人设
         let profile = RoleProfile {
             subtitle: "默认称号".into(),
-            prompt: "默认人设".into(),
+            info: "默认介绍".into(),
             ..Default::default()
         };
         RoleRepo::update_player_identity(&db, 0, "阿宅", &profile).await.unwrap();
