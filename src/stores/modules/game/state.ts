@@ -20,6 +20,9 @@ export interface GameMessage {
   ttsText?: string;
   /** 台词关联的角色 ID（null = 无角色，如工具调用回填行；生成语音计数时跳过） */
   senderRoleId?: number | null;
+  /** 该行的 TTS 序号（0-based），由后端随初始化/流式回复下发；只有它才能安全地
+   *  回传给 generate_line_voice——前端自行计数会因历史漂移而定位到别的台词。 */
+  ttsSeq?: number;
 }
 
 export interface FreeDialogueInfo {

@@ -283,6 +283,9 @@ export function convertInitLines(lines: GameLineInit[]): GameMessage[] {
       thinking: line.thinking || undefined,
       ttsText: line.tts_content || undefined,
       senderRoleId: line.sender_role_id,
+      // 直接携带后端下发的序号，不重新计数：过滤掉 system/tool 行不会改变序号口径，
+      // 可补生成语音的行始终拿到后端算好的那一个值
+      ttsSeq: line.tts_seq ?? undefined,
     };
   });
 }

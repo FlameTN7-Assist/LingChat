@@ -122,6 +122,10 @@ pub struct GameLineInit {
     pub thinking: Option<String>,
     /// 该台词的第二语言（日语）译文，供日文界面显示；无译文时为 None。
     pub tts_content: Option<String>,
+    /// 该行的 TTS 序号（0-based）：仅「可补生成语音」的 AI 行（assistant、有正文、
+    /// 有关联角色）有值，其余为 None。序号由后端统一下发，前端只回传给
+    /// `generate_line_voice`，不再自行在本地历史上计数。
+    pub tts_seq: Option<u32>,
 }
 
 // ========== Tauri 命令 ==========
@@ -406,6 +410,35 @@ pub fn compute_user_message_seqs(line_list: &[GameLine]) -> Vec<Option<u32>> {
         .collect()
 }
 
+/// 把运行时台词行转换为前端格式，并下发两类序号：玩家消息序号与 TTS 序号。
+///
+/// 两类序号都必须由后端统一计算：前端只在本地历史上按同规则重数时，任何一侧
+/// 的事件丢失都会让两份列表漂移，进而把「生成语音」定位到错误的台词上。
+/// 初始化与回溯共用本函数，保证同一行在全链路始终拿到同一个序号。
+pub(crate) fn build_game_line_inits(line_list: &[GameLine]) -> Vec<GameLineInit> {
+    let user_seqs = compute_user_message_seqs(line_list);
+    let tts_seqs = super::chat::tts_seqs(line_list);
+    line_list
+        .iter()
+        .enumerate()
+        .map(|(i, gl)| GameLineInit {
+            content: gl.base.content.clone(),
+            attribute: gl.base.attribute.as_str().to_string(),
+            sender_role_id: gl.base.sender_role_id,
+            display_name: gl.base.display_name.clone(),
+            original_emotion: gl.base.original_emotion.clone(),
+            predicted_emotion: gl.base.predicted_emotion.clone(),
+            action_content: gl.base.action_content.clone(),
+            audio_file: gl.base.audio_file.clone(),
+            perceived_role_ids: gl.perceived_role_ids.clone(),
+            user_message_seq: user_seqs[i],
+            thinking: gl.base.thinking.clone(),
+            tts_content: gl.base.tts_content.clone(),
+            tts_seq: tts_seqs[i],
+        })
+        .collect()
+}
+
 /// 从 AIService 快照构建 WebInitData（不持锁的函数）
 pub(crate) async fn build_web_init_data(
     service: &crate::ai_service::service::AIService,
@@ -438,26 +471,7 @@ pub(crate) async fn build_web_init_data(
         active_script,
     ) = {
         let mut gs = service.game_status.lock().await;
-        let seqs = compute_user_message_seqs(&gs.line_list);
-        let lines: Vec<GameLineInit> = gs
-            .line_list
-            .iter()
-            .zip(seqs.iter())
-            .map(|(gl, &seq)| GameLineInit {
-                content: gl.base.content.clone(),
-                attribute: gl.base.attribute.as_str().to_string(),
-                sender_role_id: gl.base.sender_role_id,
-                display_name: gl.base.display_name.clone(),
-                original_emotion: gl.base.original_emotion.clone(),
-                predicted_emotion: gl.base.predicted_emotion.clone(),
-                action_content: gl.base.action_content.clone(),
-                audio_file: gl.base.audio_file.clone(),
-                perceived_role_ids: gl.perceived_role_ids.clone(),
-                user_message_seq: seq,
-                thinking: gl.base.thinking.clone(),
-                tts_content: gl.base.tts_content.clone(),
-            })
-            .collect();
+        let lines: Vec<GameLineInit> = build_game_line_inits(&gs.line_list);
 
         let mut sid = gs.current_scene_id.clone();
 
