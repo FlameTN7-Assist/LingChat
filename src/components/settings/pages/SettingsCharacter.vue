@@ -1,5 +1,8 @@
 <template>
   <MenuPage>
+    <!-- 身份管理并入角色 Tab：玩家身份与 AI 角色统一在同一页管理 -->
+    <IdentitySection />
+
     <MenuItem :title="$t('settings.character.list.title')">
       <template #header>
         <Rabbit :size="20" />
@@ -109,6 +112,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { invoke } from "@tauri-apps/api/core";
 
 import CharacterCard from "../../ui/Menu/CharacterCard.vue";
+import IdentitySection from "./IdentitySection.vue";
 import { Button } from "../../base";
 import { MenuItem, MenuPage } from "../../ui";
 import { characterGetAll } from "../../../api/services/character";
@@ -243,6 +247,14 @@ watch(
   () => gameStore.mainRoleId,
   () => {
     currentPage.value = 1;
+    loadCharacters();
+  },
+);
+
+// 身份 CRUD / 角色设置保存后后端广播 role:list-updated：重拉角色列表保持同步
+watch(
+  () => gameStore.roleListVersion,
+  () => {
     loadCharacters();
   },
 );

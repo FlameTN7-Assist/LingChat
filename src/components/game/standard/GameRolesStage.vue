@@ -5,7 +5,7 @@
       class="z-2"
       :roles="gameStore.presentRolesList"
       mode="standard"
-      :active-speaker-id="gameStore.currentInteractRoleId"
+      :active-speaker-id="gameStore.displaySpeakerRoleId ?? gameStore.currentInteractRoleId"
       :audio-element="mainAudio"
       :voice-data-url="voiceDataUrl"
       :cast-scale="castScale"

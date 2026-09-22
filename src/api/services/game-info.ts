@@ -6,7 +6,9 @@ import type { SceneInfo } from "./scene";
 export interface CharacterSettings {
   ai_name: string;
   ai_subtitle: string;
+  /** @deprecated 残留只读字段：玩家名真相源已搬至身份体系（role 表 role_type=User 实体的 name），后端仍会返回但前端不再编辑或作为真相源 */
   user_name: string;
+  /** @deprecated 残留只读字段：玩家副标题真相源已搬至身份实体的 profile.subtitle */
   user_subtitle: string;
   character_id: number | null;
   thinking_message: string;
@@ -36,7 +38,7 @@ export interface GameLineInit {
   action_content: string | null;
   audio_file: string | null;
   perceived_role_ids: number[];
-  /** 玩家消息序号（1-indexed），仅 sender_role_id == 0 的 user 行有值 */
+  /** 玩家消息序号（1-indexed），仅「玩家身份实体（role_type=User，含 id=0）」发出的 user 行有值 */
   user_message_seq: number | null;
   /** 该轮生成的思考链（仅每轮最后一条 assistant 行有值） */
   thinking: string | null;

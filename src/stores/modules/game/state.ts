@@ -67,9 +67,15 @@ export interface GameState {
   presentRoleIds: number[];
   mainRoleId: number;
   currentInteractRoleId: number | null;
+  /** 正在展示的那条 AI 台词的发送者（展示态快照）。与 currentInteractRoleId 区分：
+   *  后者是后端当前交互对象的镜像，character:switch 入队旁路会提前改写它，
+   *  展示层（立绘高亮/台词合并判定）必须读这个快照才不会张冠李戴 */
+  displaySpeakerRoleId: number | null;
 
   userName: string;
   userSubtitle: string;
+  /** 角色/身份列表版本号：后端 role:list-updated 广播时自增，驱动各列表重拉 */
+  roleListVersion: number;
 
   currentLine: string;
   currentStatus: "input" | "thinking" | "responding" | "presenting";
@@ -102,9 +108,11 @@ export const state: GameState = {
   presentRoleIds: [],
   mainRoleId: -1,
   currentInteractRoleId: -1,
+  displaySpeakerRoleId: null,
 
   userName: "",
   userSubtitle: "",
+  roleListVersion: 0,
 
   currentLine: "",
   currentStatus: "input",
