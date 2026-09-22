@@ -5,6 +5,8 @@
 //! 附身期间玩家以被附身实体的身份发言（玩家台词 `sender_role_id` = 该实体），
 //! 该实体的 AI 生成休眠；切走后它恢复 AI 控制，期间台词按 sender 天然留在其记忆中。
 
+use std::collections::HashSet;
+
 use anyhow::{anyhow, Result};
 use sea_orm::DatabaseConnection;
 
@@ -20,6 +22,27 @@ pub struct PossessOutcome {
     pub display_name: String,
     /// 若因附身当前对话对象而移交了话筒，这里是被移交到的在场 AI 实体 id。
     pub handoff_role_id: Option<i32>,
+}
+
+/// 选出承接话筒的在场实体：候选须不是被附身目标本身，且不属于玩家身份集合
+/// （User 实体永不由 AI 生成，接管者只能是 AI；正在被玩家附身的 AI 在新身份
+/// 生效后即恢复 AI 控制，故不排除）。
+///
+/// 候选顺序必须确定：`present_role_ids` 是 `HashSet`，直接迭代会让「交给谁」随
+/// 进程随机种子变化，多 AI 在场时同一局面会得到不同结果。故优先按舞台顺序
+/// （`onstage_role_ids`，即玩家看到的立绘次序）取第一个候选，再以在场集合中
+/// 最小的 role_id 兜底，保证同状态必得同一结果。
+pub(crate) fn pick_handoff_role(
+    onstage_role_ids: &[i32],
+    present_role_ids: &HashSet<i32>,
+    possessed_role_id: i32,
+    human_role_ids: &HashSet<i32>,
+) -> Option<i32> {
+    let eligible = |id: &i32| *id != possessed_role_id && !human_role_ids.contains(id);
+    if let Some(id) = onstage_role_ids.iter().find(|id| eligible(id)) {
+        return Some(*id);
+    }
+    present_role_ids.iter().filter(|id| eligible(id)).min().copied()
 }
 
 /// 把玩家附身到指定实体上，返回该实体的显示名与话筒移交结果。
@@ -64,10 +87,12 @@ pub async fn possess_entity(
     // 候选排除被附身目标本身与全部 User 身份；正在被玩家附身的 AI 切换后即恢复
     // AI 控制，可以承接话筒。
     let handoff = if gs.current_role_id == Some(role_id) {
-        gs.present_role_ids
-            .iter()
-            .copied()
-            .find(|id| *id != role_id && !human_role_ids.contains(id))
+        pick_handoff_role(
+            &gs.onstage_role_ids,
+            &gs.present_role_ids,
+            role_id,
+            &human_role_ids,
+        )
     } else {
         None
     };

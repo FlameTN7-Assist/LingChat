@@ -4,6 +4,7 @@ use tauri::{AppHandle, Manager};
 use crate::AppState;
 use crate::ai_service::game_system::auto_save;
 use crate::ai_service::game_system::game_status::GameStatusSnapshot;
+use crate::ai_service::game_system::possession::pick_handoff_role;
 use crate::ai_service::types::PLAYER_ROLE_ID;
 use crate::api::game::WebInitData;
 use crate::api::game::build_web_init_data;
@@ -428,11 +429,12 @@ pub async fn load_save(app: AppHandle, save_id: i32) -> Result<WebInitData, Stri
         if gs.possessed_role_id != PLAYER_ROLE_ID
             && gs.current_role_id == Some(gs.possessed_role_id)
         {
-            let takeover = gs
-                .present_role_ids
-                .iter()
-                .copied()
-                .find(|id| *id != gs.possessed_role_id && !gs.human_role_ids.contains(id));
+            let takeover = pick_handoff_role(
+                &gs.onstage_role_ids,
+                &gs.present_role_ids,
+                gs.possessed_role_id,
+                &gs.human_role_ids,
+            );
             match takeover {
                 Some(id) => {
                     tracing::warn!(
