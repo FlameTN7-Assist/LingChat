@@ -1588,11 +1588,13 @@ impl PreviewSession {
         if !uname.is_empty() {
             gs.player.user_name = uname;
         }
+        // 人设 SYSTEM 台词要嵌入玩家名；drop 前先取出当前值（试玩期间刚按主角卡覆盖过）
+        let player_name = gs.player.user_name.clone();
 
         // 人设 SYSTEM 台词。缺了它 role_manager 会警告「人设丢失」，
         // 而且 AI 对话会在没有人设的上下文里生成。
         drop(gs);
-        if let Some(prompt) = build_main_role_prompt(db, data_dir, main_id).await {
+        if let Some(prompt) = build_main_role_prompt(db, data_dir, main_id, &player_name).await {
             let line = crate::ai_service::types::LineBase {
                 content: prompt.text,
                 attribute: crate::ai_service::types::LineAttributeExt(
@@ -1705,6 +1707,7 @@ async fn build_main_role_prompt(
     db: &DatabaseConnection,
     data_dir: &Path,
     role_id: i32,
+    player_name: &str,
 ) -> Option<MainRolePrompt> {
     use crate::utils::prompt::{PromptOptions, sys_prompt_builder_by_settings};
 
@@ -1726,8 +1729,8 @@ async fn build_main_role_prompt(
             role_id
         );
     }
-    // 用 by_settings 版本而不是自己拼参数：它会一并带上 settings.user_name，
-    // 与正式游玩走的是同一条构建路径
+    // 用 by_settings 版本而不是自己拼参数：它会一并带上统一装配的对话格式提示，
+    // 与正式游玩走的是同一条构建路径；玩家名由调用方传入当前玩家缓存名
     Some(MainRolePrompt {
         text: sys_prompt_builder_by_settings(
             &settings,
@@ -1735,6 +1738,7 @@ async fn build_main_role_prompt(
                 output_sec_lang: true,
                 no_emotion_limit: true,
             },
+            player_name,
         ),
         name: settings.ai_name,
     })

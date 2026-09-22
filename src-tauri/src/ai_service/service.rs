@@ -101,6 +101,11 @@ impl AIService {
 
         let mut gs = self.game_status.lock().await;
 
+        // 玩家名已搬到实体行（id=0 玩家身份的 name + profile）。初始化前先刷新缓存，
+        // 使 system prompt 与 gs.player 同源；AI 的 settings.yml 只读 user_name 字段
+        // 已不再作为玩家名真相源。
+        gs.refresh_player_cache(&self.db).await?;
+
         let settings = gs
             .role_manager
             .get_role(&self.db, cid)
@@ -109,15 +114,14 @@ impl AIService {
             .clone();
 
         let ai_prompt = sys_prompt_builder(
-            &settings.user_name.clone(),
+            &gs.player.user_name.clone(),
             &settings.ai_name.clone(),
             &settings.system_prompt.clone().unwrap_or(default_prompt),
             settings.system_prompt_example.clone().as_deref(),
             settings.system_prompt_example_old.clone().as_deref(),
             prompt_options,
         );
-        gs.player.user_name = settings.user_name.clone();
-        gs.player.user_subtitle = settings.user_subtitle.clone().unwrap_or_default();
+        // gs.player 的 user_name/user_subtitle 由 refresh_player_cache 维护，不再直接赋值
 
         // 此处是初始角色被注册的地方
         let _ = gs.get_role(&self.db, cid).await?;
@@ -183,6 +187,10 @@ impl AIService {
         gs.onstage_role_ids.clear();
         gs.present_role_ids.clear();
         gs.entry_greeting_done = false;
+        // 玩家身份集合可能因增删身份而与缓存不一致，新会话开始前校正
+        if let Err(e) = gs.refresh_human_role_ids(&self.db).await {
+            tracing::warn!("清档后刷新玩家身份缓存失败: {e}");
+        }
         // 会话边界代号：切换角色 / 读档 / 清空对话都会清空 GameStatus 并重建，
         // 旧一轮自由对话的流式任务（consumer/publisher）可能仍在游离生成。
         // 递增代号后，它们的迟到 `add_assistant_line` / 工具回填会因

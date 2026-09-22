@@ -13,7 +13,7 @@ use crate::ai_service::message_system::generator::{
     GeneratorDeps, GeneratorSource, MessageGenerator,
 };
 use crate::ai_service::types::{
-    CharacterSettings, GameLine, LineAttributeExt, LineBase, Live2dSettings,
+    CharacterSettings, GameLine, LineAttributeExt, LineBase, Live2dSettings, PLAYER_ROLE_ID,
 };
 use crate::config::{self, AppConfig};
 use crate::db::entities::line;
@@ -411,7 +411,7 @@ pub(crate) async fn build_web_init_data(
     service: &crate::ai_service::service::AIService,
     app: &AppHandle,
 ) -> Result<WebInitData, String> {
-    let character_settings = {
+    let mut character_settings = {
         let cid = service.init_character_id;
         let cid = match cid {
             Some(v) => v,
@@ -536,6 +536,14 @@ pub(crate) async fn build_web_init_data(
         )
     };
 
+    // 玩家名的真相源是实体行（玩家缓存）。主角色 settings.yml 里那份 user_name
+    // 只在"搬家"时读过一次，可能已过时；这里统一覆盖，保证前端初始玩家名与后端一致。
+    {
+        let gs = service.game_status.lock().await;
+        character_settings.user_name = gs.player.user_name.clone();
+        character_settings.user_subtitle = gs.player.user_subtitle.clone();
+    }
+
     // 从 session store 恢复上次会话状态（服装、音乐、环境音）
     let (last_bgm_track, last_bgm_paused, last_bgm_mode, last_ambient_tracks) = {
         let store = app.store(config::STORE_FILE).ok();
@@ -598,7 +606,7 @@ pub(crate) async fn build_web_init_data(
 
 #[tauri::command]
 pub async fn add_role_to_scene(app: AppHandle, role_id: i32) -> Result<JsonValue, String> {
-    if role_id == 0 {
+    if role_id == PLAYER_ROLE_ID {
         return Err("无法添加玩家角色 (role_id=0)".to_string());
     }
 
@@ -642,8 +650,9 @@ pub async fn add_role_to_scene(app: AppHandle, role_id: i32) -> Result<JsonValue
             .clone()
             .unwrap_or_else(|| format!("角色{}", role_id));
 
-        // 构建角色的 system prompt
-        let system_prompt = sys_prompt_builder_by_settings(&role.settings, prompt_options);
+        // 构建角色的 system prompt（玩家名取自玩家缓存）
+        let system_prompt =
+            sys_prompt_builder_by_settings(&role.settings, prompt_options, &gs.player.user_name);
 
         // ★ 注入 System 行必须在 onstage_role 之前。
         //    仅当台词表中不存在本角色的 System 行时才添加（避免退出后重入时重复）。
@@ -705,7 +714,7 @@ pub async fn add_role_to_scene(app: AppHandle, role_id: i32) -> Result<JsonValue
 
 #[tauri::command]
 pub async fn remove_role_from_scene(app: AppHandle, role_id: i32) -> Result<JsonValue, String> {
-    if role_id == 0 {
+    if role_id == PLAYER_ROLE_ID {
         return Err("无法移除玩家角色 (role_id=0)".to_string());
     }
 

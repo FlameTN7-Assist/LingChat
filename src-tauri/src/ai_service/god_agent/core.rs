@@ -6,7 +6,7 @@ use crate::ai_service::game_system::game_status::GameStatus;
 use crate::ai_service::god_agent::config::GodAgentConfig;
 use crate::ai_service::god_agent::tools;
 use crate::ai_service::llm::{LlmSlot, slot_snapshot};
-use crate::ai_service::types::{GameLine, LlmMessage};
+use crate::ai_service::types::{GameLine, LlmMessage, PLAYER_ROLE_ID};
 
 // ============================================================
 // GodAgentCore
@@ -31,9 +31,18 @@ impl GodAgentCore {
     ///
     /// 条件：
     /// - 自由对话模式（`script_status.is_none()`）
-    /// - 在场角色数 > 1（含玩家，即玩家 + 至少 1 个 NPC）
+    /// - 在场且非 User 身份的 AI 实体数 ≥ 2
+    ///
+    /// 候选口径与 `decide_next_speaker` 完全一致：User 身份实体由玩家操控
+    /// （永不交给 AI 生成），不参与编排。单 AI 场景因此不会激活，
+    /// 不会再被"强制多轮"。
     pub fn should_activate(&self, gs: &GameStatus) -> bool {
-        gs.script_status.is_none() && gs.present_role_ids.len() > 1
+        gs.script_status.is_none()
+            && gs.present_role_ids
+                .iter()
+                .filter(|&&id| !gs.human_role_ids.contains(&id))
+                .count()
+                >= 2
     }
 
     // ============================================================
@@ -144,10 +153,11 @@ impl GodAgentCore {
         let npc_ids: Vec<i32> = gs
             .present_role_ids
             .iter()
-            .filter(|&&id| id != 0)
+            .filter(|&&id| !gs.human_role_ids.contains(&id))
             .copied()
             .collect();
 
+        // 没有可编排的 AI（真·一对一）时把话筒交还玩家
         if npc_ids.len() <= 1 {
             return Ok((npc_ids.first().copied().unwrap_or(0), "single_npc".into()));
         }
@@ -180,14 +190,17 @@ impl GodAgentCore {
         if let Some(ref tool_calls) = response.tool_calls {
             if let Some(tc) = tool_calls.first() {
                 if let Some(result) = tools::parse_speaker_selection(tc) {
-                    if result.0 == 0 || gs.present_role_ids.contains(&result.0) {
+                    // 合法目标只有两类：候选 AI 之一，或默认玩家身份实体（交还玩家）。
+                    // 「仅在 present 里」不再算数——User 身份实体与未参与编排的
+                    // 角色都不能被 LLM 选中。
+                    if result.0 == PLAYER_ROLE_ID || npc_ids.contains(&result.0) {
                         return Ok(result);
                     }
-                    tracing::warn!("上帝Agent 选择了不在场的角色 {}，忽略", result.0);
+                    tracing::warn!("上帝Agent 选择了非候选角色 {}，忽略", result.0);
                     return Err(anyhow!(
-                        "上帝Agent 选择了不在场的角色 {}，在场角色: {:?}",
+                        "上帝Agent 选择了非候选角色 {}，候选角色: {:?}",
                         result.0,
-                        gs.present_role_ids
+                        npc_ids
                     ));
                 }
                 // 解析失败
