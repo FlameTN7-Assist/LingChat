@@ -115,11 +115,22 @@ jobs:
             ${{ runner.os == 'macOS' && '' || '' }}
         run: pnpm tauri build --no-bundle
 
+      # Linux 的裸二进制缺 data/ 无法运行（发布版把 data 目录放在 exe 旁边），
+      # 因此改成打便携 tar.gz：tauri-build 已把 bundle.resources 复制到
+      # target/release/ 下，脚本只需收拢成便携布局再压缩。
+      - name: 打 Linux 便携包
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/package-linux-portable.sh target/release "${{ runner.temp }}/dist"
+
       - name: 收集产物（Windows 附带 onnxruntime.dll 与 DirectML.dll）
         shell: bash
         run: |
           mkdir -p "${{ runner.temp }}/dist"
-          cp "${{ matrix.artifact-path }}" "${{ runner.temp }}/dist/"
+          # Linux 走上面的便携 tar.gz，裸二进制没有 data/ 无法运行
+          if [ "${{ runner.os }}" != "Linux" ]; then
+            cp "${{ matrix.artifact-path }}" "${{ runner.temp }}/dist/"
+          fi
           # DirectML.dll 是 DML EP 的运行时依赖，缺了它选 GPU 会静默回落 CPU
           for dll in onnxruntime.dll DirectML.dll; do
             if [ "${{ runner.os }}" = "Windows" ] && [ -f "target/release/$dll" ]; then
