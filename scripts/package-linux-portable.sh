@@ -36,12 +36,23 @@ mkdir -p "${STAGE}"
 cp "${TARGET_DIR}/ling_chat" "${STAGE}/ling_chat"
 chmod +x "${STAGE}/ling_chat"
 
-# 内置资源：首次启动会从 data/.official/ 播种到 data/ 后删除它
-cp -a "${TARGET_DIR}/data" "${STAGE}/data"
+# 内置资源：首次启动会从 data/.official/ 播种到 data/ 后删除它。
+# 用 -L 解引用：构建产物里可能混入指向构建机缓存的符号链接，原样打包到用户
+# 机器上就是死链。
+cp -aL "${TARGET_DIR}/data" "${STAGE}/data"
 
-# ort webgpu 的 Dawn 动态库（目前仅 linux-amd64 生成）
-if [ -f "${TARGET_DIR}/libwebgpu_dawn.so" ]; then
-  cp -a "${TARGET_DIR}/libwebgpu_dawn.so" "${STAGE}/"
+# ort webgpu 的 Dawn 动态库（目前仅 linux-amd64 生成）。
+# ort 在 target/release 下放的是指向 ~/.cache/ort.pyke.io/... 的符号链接，
+# 必须解引用复制，否则包里是个指向构建机绝对路径的死链，程序直接起不来。
+if [ -e "${TARGET_DIR}/libwebgpu_dawn.so" ]; then
+  cp -Lp "${TARGET_DIR}/libwebgpu_dawn.so" "${STAGE}/"
+fi
+
+# 兜底校验：分发内容不允许残留任何符号链接
+if find "${STAGE}" -type l | grep -q .; then
+  echo "打包内容中残留符号链接，指向构建机路径会在用户机器上失效：" >&2
+  find "${STAGE}" -type l -printf '  %p -> %l\\n' >&2
+  exit 1
 fi
 
 cat > "${STAGE}/README.txt" <<'EOF'
