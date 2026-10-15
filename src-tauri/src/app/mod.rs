@@ -2,7 +2,7 @@
 //!
 //! 子模块：
 //! - `logging`：tracing 装配、日志设置应用、genai 调试开关热重载
-//! - `platform`：平台适配（Windows WebView2 颜色配置文件）
+//! - `platform`：平台适配（Windows WebView2 颜色配置文件、Linux WebKitGTK 渲染兼容）
 //! - `builder`：`tauri::Builder` 构建与插件注册
 //! - `commands`：全部 Tauri 命令的注册表（`generate_handler!`）
 //! - `setup`：Tauri setup 阶段的启动编排

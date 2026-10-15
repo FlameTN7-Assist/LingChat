@@ -25,6 +25,10 @@ pub fn run() {
     // Windows：设置 WebView2 颜色配置文件（强制使用线性 sRGB）。
     app::platform::apply_webview2_color_profile(&context.config().identifier);
 
+    // Linux：WebKitGTK 在 NVIDIA 专有驱动下的渲染兼容。环境变量必须早于 GTK /
+    // WebKit 初始化，WebKitWebProcess 子进程才会继承到。
+    app::platform::apply_webkit_nvidia_quirks();
+
     app::builder::build()
         .setup(move |app| app::setup::setup(app, log_filter))
         .run(context)

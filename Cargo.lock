@@ -4410,6 +4410,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "webkit2gtk-nvidia-quirk",
 ]
 
 [[package]]
@@ -10262,6 +10263,12 @@ dependencies = [
  "soup3",
  "webkit2gtk-sys",
 ]
+
+[[package]]
+name = "webkit2gtk-nvidia-quirk"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6e058d16abf0bb1973256d243ce7749f0e6821dd30d18cd9f3db42937090e8a"
 
 [[package]]
 name = "webkit2gtk-sys"
