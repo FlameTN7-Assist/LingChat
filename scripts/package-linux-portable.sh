@@ -48,10 +48,21 @@ if [ -e "${TARGET_DIR}/libwebgpu_dawn.so" ]; then
   cp -Lp "${TARGET_DIR}/libwebgpu_dawn.so" "${STAGE}/"
 fi
 
-# 兜底校验：分发内容不允许残留任何符号链接
+# 兜底校验一：二进制必须带 $ORIGIN RUNPATH，否则随包分发的动态库加载不到。
+# 这条真实踩过：libwebgpu_dawn.so 明明在包里，但二进制没有 RUNPATH，加载器
+# 只搜系统路径，用户侧直接报 "cannot open shared object file"。
+if [ -e "${STAGE}/libwebgpu_dawn.so" ] && readelf -d "${STAGE}/ling_chat" >/dev/null 2>&1; then
+  if ! readelf -d "${STAGE}/ling_chat" | grep -q 'ORIGIN'; then
+    echo "ling_chat 缺少 ORIGIN RUNPATH，随包分发的 libwebgpu_dawn.so 将无法加载" >&2
+    readelf -d "${STAGE}/ling_chat" | grep -iE 'rpath|runpath' >&2 || echo '  （无 RUNPATH/RPATH）' >&2
+    exit 1
+  fi
+fi
+
+# 兜底校验二：分发内容不允许残留任何符号链接
 if find "${STAGE}" -type l | grep -q .; then
   echo "打包内容中残留符号链接，指向构建机路径会在用户机器上失效：" >&2
-  find "${STAGE}" -type l -printf '  %p -> %l\\n' >&2
+  find "${STAGE}" -type l -printf '  %p -> %l\n' >&2
   exit 1
 fi
 
